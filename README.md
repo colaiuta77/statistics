@@ -2,9 +2,9 @@
 
 BookOasis 일반도서 라이브러리를 백그라운드에서 미리 집계하고, 저장된 스냅샷을 ECharts 기반 대시보드로 빠르게 보여주는 독립 카테고리 플러그인입니다.
 
-![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.jpg?v=1.0.0)
+![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.0.0)
 
-![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.jpg?v=1.0.0)
+![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.0.0)
 
 ## 버전 및 호환 정보
 
