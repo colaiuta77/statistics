@@ -11,7 +11,7 @@
   --stats-card-unit: 330px;
   --stats-card-gap: 10px;
   --stats-card-double: calc((var(--stats-card-unit) * 2) + var(--stats-card-gap));
-  --stats-card-header-height: 55px;
+  --stats-card-header-height: 68px;
   color: var(--stats-text);
   width: 100%;
   max-width: 1680px;

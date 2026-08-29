@@ -399,22 +399,25 @@ def _release_statistics(rows):
     }
 
 
-def _metadata_completeness(rows):
+def _metadata_completeness(rows, fields=None):
+    fields = fields or _METADATA_FIELDS
     total = sum(_int(row.get("total")) for row in rows or [])
     result = []
-    for key, label in _METADATA_FIELDS:
+    for key, label in fields:
         present = sum(_int(row.get(key)) for row in rows or [])
         percent = round((present / total) * 100, 1) if total else 0.0
         result.append({"key": key, "label": label, "present": present, "total": total, "percent": percent})
     return result
 
 
-def build_metadata_missing(rows):
+def build_metadata_missing(rows, fields=None, missing_keys=None):
+    fields = fields or _METADATA_FIELDS
+    missing_keys = missing_keys or _METADATA_MISSING_KEYS
     total = sum(_int(row.get("total")) for row in rows or [])
-    labels = dict(_METADATA_FIELDS)
-    order = {key: index for index, key in enumerate(_METADATA_MISSING_KEYS)}
+    labels = dict(fields)
+    order = {key: index for index, key in enumerate(missing_keys)}
     result = []
-    for key in _METADATA_MISSING_KEYS:
+    for key in missing_keys:
         present = sum(_int(row.get(key)) for row in rows or [])
         missing = max(0, total - present)
         if missing > 0:
@@ -423,7 +426,8 @@ def build_metadata_missing(rows):
     return result
 
 
-def _metadata_heatmap(libraries, metadata_rows):
+def _metadata_heatmap(libraries, metadata_rows, fields=None):
+    fields = fields or _METADATA_FIELDS
     grouped = _group_by_library(metadata_rows)
     lib_rows = []
     values = []
@@ -432,12 +436,12 @@ def _metadata_heatmap(libraries, metadata_rows):
         rows = grouped.get(lib_id, [])
         total = sum(_int(row.get("total")) for row in rows)
         lib_rows.append({"id": _int(library.get("id")), "name": str(library.get("name") or f"#{lib_id}")})
-        for field_idx, (key, _label) in enumerate(_METADATA_FIELDS):
+        for field_idx, (key, _label) in enumerate(fields):
             present = sum(_int(row.get(key)) for row in rows)
             percent = round((present / total) * 100, 1) if total else 0.0
             values.append([field_idx, len(lib_rows) - 1, percent])
     return {
-        "fields": [{"key": key, "label": label} for key, label in _METADATA_FIELDS],
+        "fields": [{"key": key, "label": label} for key, label in fields],
         "libraries": lib_rows,
         "values": values,
     }
@@ -446,8 +450,9 @@ def _metadata_heatmap(libraries, metadata_rows):
 class StatisticsAggregator:
     """Generate all chart scopes using grouped BookOasis queries only."""
 
-    def __init__(self, gateway):
+    def __init__(self, gateway, session_type="general"):
         self.gateway = gateway
+        self.session_type = str(session_type or "general")
         self.engine = str(getattr(gateway, "_engine", os.environ.get("DB_ENGINE", "sqlite")) or "sqlite").lower()
 
     @staticmethod
@@ -800,7 +805,309 @@ class StatisticsAggregator:
             scopes[str(library["id"])] = build_scope(str(library["id"]))
 
         return {
-            "version": 1,
+            "version": 2,
+            "session_type": self.session_type,
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "generation_ms": round((time.monotonic() - started) * 1000),
+            "engine": self.engine,
+            "libraries": libraries,
+            "scopes": scopes,
+        }
+
+
+_MEDIA_SCHEMAS = {
+    "audiobook": {
+        "item_table": "audiobooks",
+        "child_table": "audiobook_tracks",
+        "child_fk": "audiobook_id",
+        "item_select": """
+            id, library_id, title, author, publisher, code, poster,
+            premiered AS release_date, description, folder_name,
+            total_duration AS duration_seconds, total_tracks AS child_count,
+            file_type, web_id, created_at,
+            '' AS genre, '' AS backdrop
+        """,
+        "metadata_fields": [
+            ("author", "저자"),
+            ("publisher", "출판사"),
+            ("description", "소개"),
+            ("poster", "표지"),
+            ("release_date", "출시일"),
+            ("duration_seconds", "재생시간"),
+            ("child_count", "트랙"),
+            ("file_type", "파일 유형"),
+            ("code", "코드"),
+            ("file_size", "파일 크기"),
+        ],
+        "count_buckets": [(1, "1"), (5, "2–5"), (10, "6–10"), (20, "11–20")],
+    },
+    "video": {
+        "item_table": "videos",
+        "child_table": "video_episodes",
+        "child_fk": "video_id",
+        "item_select": """
+            id, library_id, title, '' AS author, '' AS publisher, '' AS code,
+            poster, premiered AS release_date, description, folder_name,
+            total_duration AS duration_seconds, total_episodes AS child_count,
+            '' AS file_type, web_id, created_at, genres AS genre, backdrop
+        """,
+        "metadata_fields": [
+            ("genre", "장르"),
+            ("poster", "포스터"),
+            ("backdrop", "배경 이미지"),
+            ("release_date", "출시일"),
+            ("description", "소개"),
+            ("duration_seconds", "재생시간"),
+            ("child_count", "에피소드"),
+            ("web_id", "웹 ID"),
+            ("folder_name", "폴더명"),
+            ("file_size", "파일 크기"),
+        ],
+        "count_buckets": [(1, "1"), (5, "2–5"), (10, "6–10"), (20, "11–20")],
+    },
+}
+
+
+def _month_key(value):
+    match = re.search(r"(?<!\d)(\d{4})[-/.](\d{1,2})(?!\d)", str(value or ""))
+    if not match:
+        return ""
+    month = int(match.group(2))
+    return f"{match.group(1)}-{month:02d}" if 1 <= month <= 12 else ""
+
+
+def _top_item_rows(items, field, limit=15):
+    counter = Counter()
+    labels = {}
+    for item in items:
+        label = normalize_token(item.get(field))
+        if not label:
+            continue
+        key = label.casefold()
+        labels.setdefault(key, label)
+        counter[key] += 1
+    return [
+        {"label": labels[key], "count": int(count)}
+        for key, count in sorted(counter.items(), key=lambda row: (-row[1], labels[row[0]].casefold()))[:limit]
+    ]
+
+
+class MediaStatisticsAggregator:
+    """Aggregate audiobook/video statistics through their native parent and child tables."""
+
+    def __init__(self, gateway, session_type):
+        if session_type not in _MEDIA_SCHEMAS:
+            raise ValueError(f"unsupported media statistics session: {session_type}")
+        self.gateway = gateway
+        self.session_type = session_type
+        self.schema = _MEDIA_SCHEMAS[session_type]
+        self.engine = str(getattr(gateway, "_engine", os.environ.get("DB_ENGINE", "sqlite")) or "sqlite").lower()
+
+    def _fetch_all(self, marker, sql):
+        return self.gateway.fetch_all(f"/*statistics:{self.session_type}:{marker}*/\n{sql}") or []
+
+    def _load_libraries(self):
+        return [
+            {
+                "id": _int(row.get("id")),
+                "name": str(row.get("name") or ""),
+                "color": str(row.get("color") or ""),
+                "icon": str(row.get("icon") or ""),
+                "last_scanned_at": str(row.get("last_scanned_at") or ""),
+            }
+            for row in self._fetch_all(
+                "libraries",
+                "SELECT id, name, color, icon, last_scanned_at FROM libraries ORDER BY sort_order, name, id",
+            )
+        ]
+
+    def _load_items(self):
+        table = self.schema["item_table"]
+        return self._fetch_all(
+            "items",
+            f"""
+            SELECT {self.schema['item_select']}
+            FROM {table}
+            WHERE COALESCE(is_deleted, 0) = 0
+            """,
+        )
+
+    def _load_files(self):
+        item_table = self.schema["item_table"]
+        child_table = self.schema["child_table"]
+        child_fk = self.schema["child_fk"]
+        return self._fetch_all(
+            "files",
+            f"""
+            SELECT child.{child_fk} AS item_id,
+                   LOWER(TRIM(COALESCE(child.format, 'unknown'))) AS label,
+                   COUNT(*) AS count,
+                   COALESCE(SUM(COALESCE(child.file_size, 0)), 0) AS bytes
+            FROM {child_table} child
+            JOIN {item_table} item ON item.id = child.{child_fk}
+            WHERE COALESCE(item.is_deleted, 0) = 0
+            GROUP BY child.{child_fk}, LOWER(TRIM(COALESCE(child.format, 'unknown')))
+            """,
+        )
+
+    def _metadata_rows(self, libraries, items, bytes_by_item, count_by_item):
+        fields = self.schema["metadata_fields"]
+        rows = []
+        for library in libraries:
+            library_id = _int(library.get("id"))
+            selected = [item for item in items if _int(item.get("library_id")) == library_id]
+            row = {"library_id": library_id, "total": len(selected)}
+            for key, _label in fields:
+                if key == "file_size":
+                    row[key] = sum(1 for item in selected if bytes_by_item.get(_int(item.get("id")), 0) > 0)
+                elif key == "child_count":
+                    row[key] = sum(1 for item in selected if count_by_item.get(_int(item.get("id")), 0) > 0)
+                elif key == "duration_seconds":
+                    row[key] = sum(1 for item in selected if float(item.get(key) or 0) > 0)
+                else:
+                    row[key] = sum(1 for item in selected if normalize_token(item.get(key)))
+            rows.append(row)
+        return rows
+
+    def _score_rows(self, items, bytes_by_item, count_by_item):
+        fields = self.schema["metadata_fields"]
+        counter = Counter()
+        for item in items:
+            filled = 0
+            for key, _label in fields:
+                if key == "file_size":
+                    present = bytes_by_item.get(_int(item.get("id")), 0) > 0
+                elif key == "child_count":
+                    present = count_by_item.get(_int(item.get("id")), 0) > 0
+                elif key == "duration_seconds":
+                    present = float(item.get(key) or 0) > 0
+                else:
+                    present = bool(normalize_token(item.get(key)))
+                filled += int(present)
+            counter[(_int(item.get("library_id")), filled)] += 1
+        return [
+            {"library_id": library_id, "filled_count": filled, "count": count}
+            for (library_id, filled), count in sorted(counter.items())
+        ]
+
+    def _count_distribution(self, items, count_by_item):
+        labels = [label for _limit, label in self.schema["count_buckets"]] + ["21+"]
+        counts = Counter()
+        for item in items:
+            value = count_by_item.get(_int(item.get("id")), 0)
+            if value <= 0:
+                continue
+            label = "21+"
+            for limit, candidate in self.schema["count_buckets"]:
+                if value <= limit:
+                    label = candidate
+                    break
+            counts[label] += 1
+        return [{"label": label, "count": int(counts[label])} for label in labels]
+
+    def aggregate(self):
+        started = time.monotonic()
+        libraries = self._load_libraries()
+        # ponytail: media parent rows are loaded once; move scope grouping into SQL if catalogs reach book-scale size.
+        items = [dict(row) for row in self._load_items()]
+        file_rows = [dict(row) for row in self._load_files()]
+        item_by_id = {_int(item.get("id")): item for item in items}
+        bytes_by_item = Counter()
+        count_by_item = Counter()
+        for row in file_rows:
+            item_id = _int(row.get("item_id"))
+            bytes_by_item[item_id] += _int(row.get("bytes"))
+            count_by_item[item_id] += _int(row.get("count"))
+
+        metadata = self._metadata_rows(libraries, items, bytes_by_item, count_by_item)
+        scores = self._score_rows(items, bytes_by_item, count_by_item)
+        metadata_by_library = _group_by_library(metadata)
+        scores_by_library = _group_by_library(scores)
+        fields = self.schema["metadata_fields"]
+        current_year = str(datetime.now().year)
+
+        def build_scope(scope_id):
+            is_all = scope_id == "all"
+            selected_items = items if is_all else [item for item in items if str(_int(item.get("library_id"))) == scope_id]
+            selected_ids = {_int(item.get("id")) for item in selected_items}
+            selected_files = [row for row in file_rows if _int(row.get("item_id")) in selected_ids]
+            selected_libraries = libraries if is_all else [row for row in libraries if str(row["id"]) == scope_id]
+            metadata_rows = metadata if is_all else metadata_by_library.get(scope_id, [])
+            score_rows = scores if is_all else scores_by_library.get(scope_id, [])
+
+            genre_stats = build_genre_statistics(
+                [{"genre": item.get("genre"), "count": 1} for item in selected_items],
+                top_limit=25,
+                chord_limit=12,
+            )
+            release_stats = _release_statistics(
+                [{"release_date": item.get("release_date"), "count": 1} for item in selected_items]
+            )
+            added_counter = Counter(_month_key(item.get("created_at")) for item in selected_items)
+            added_counter.pop("", None)
+            books_added = [{"period": key, "count": int(added_counter[key])} for key in sorted(added_counter)][-60:]
+
+            format_month = []
+            for row in selected_files:
+                item = item_by_id.get(_int(row.get("item_id")), {})
+                period = _month_key(item.get("created_at"))
+                if period:
+                    format_month.append({"period": period, "label": row.get("label"), "count": row.get("count")})
+            format_over_time = _combine_format_period_rows(format_month)
+            periods = sorted({row["period"] for row in format_over_time})[-60:]
+            format_over_time = [row for row in format_over_time if row["period"] in set(periods)]
+
+            summary = {
+                "item_count": len(selected_items),
+                "child_count": sum(_int(row.get("count")) for row in selected_files),
+                "author_count": len({normalize_token(item.get("author")).casefold() for item in selected_items if normalize_token(item.get("author"))}),
+                "publisher_count": len({normalize_token(item.get("publisher")).casefold() for item in selected_items if normalize_token(item.get("publisher"))}),
+                "storage_bytes": sum(_int(row.get("bytes")) for row in selected_files),
+                "duration_seconds": round(sum(float(item.get("duration_seconds") or 0) for item in selected_items)),
+                "genre_count": _int(genre_stats.get("genre_count")),
+                "library_count": len(selected_libraries),
+                "publication_year_min": release_stats["min_year"],
+                "publication_year_max": release_stats["max_year"],
+                "added_this_year": sum(count for period, count in added_counter.items() if period.startswith(current_year)),
+            }
+            largest = sorted(selected_items, key=lambda item: (-bytes_by_item.get(_int(item.get("id")), 0), -_int(item.get("id"))))[:20]
+            return {
+                "summary": summary,
+                "format_distribution": _combine_label_rows(selected_files, "count")[:15],
+                "storage_by_format": _combine_label_rows(selected_files, "bytes", output_value_key="bytes")[:15],
+                "genre_distribution": genre_stats["distribution"],
+                "genre_cooccurrence": genre_stats["chord"],
+                "top_authors": _top_item_rows(selected_items, "author"),
+                "top_series": [],
+                "top_publishers": _top_item_rows(selected_items, "publisher"),
+                "metadata_completeness": _metadata_completeness(metadata_rows, fields),
+                "metadata_score_distribution": build_metadata_score_distribution(score_rows),
+                "metadata_missing": build_metadata_missing(metadata_rows, fields, [key for key, _label in fields]),
+                "library_metadata_completeness": _metadata_heatmap(selected_libraries, metadata_rows, fields),
+                "books_added_over_time": books_added,
+                "format_share_over_time": format_over_time,
+                "publication_decade": release_stats["decades"],
+                "publication_year_timeline": release_stats["timeline"],
+                "page_count_distribution": self._count_distribution(selected_items, count_by_item),
+                "largest_books": [
+                    {
+                        "id": _int(item.get("id")),
+                        "title": str(item.get("title") or ""),
+                        "format": str(next((row.get("label") for row in selected_files if _int(row.get("item_id")) == _int(item.get("id"))), "")),
+                        "bytes": int(bytes_by_item.get(_int(item.get("id")), 0)),
+                    }
+                    for item in largest
+                    if bytes_by_item.get(_int(item.get("id")), 0) > 0
+                ],
+            }
+
+        scopes = {"all": build_scope("all")}
+        for library in libraries:
+            scopes[str(library["id"])] = build_scope(str(library["id"]))
+
+        return {
+            "version": 2,
+            "session_type": self.session_type,
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "generation_ms": round((time.monotonic() - started) * 1000),
             "engine": self.engine,
