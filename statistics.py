@@ -5,21 +5,37 @@ import os
 
 from plugins.metadata.base import BaseMetadataProvider
 
-from .statistics_core import SnapshotStore, StatisticsAggregator, StatisticsRuntime
+from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
 PLUGIN_VERSION = "1.0.0"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
-_STORE = SnapshotStore(os.path.join(_DATA_DIR, "statistics.db"))
-_RUNTIME = StatisticsRuntime(store=_STORE, periodic_seconds=6 * 60 * 60)
+SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
 
 
-def _aggregate_general():
-    from services.plugin_db_gateway import PluginDatabaseGateway
+def _store_path(db_type):
+    filename = "statistics.db" if db_type == "general" else f"statistics-{db_type}.db"
+    return os.path.join(_DATA_DIR, filename)
 
-    gateway = PluginDatabaseGateway("general")
-    return StatisticsAggregator(gateway).aggregate()
+
+_RUNTIMES = {
+    db_type: StatisticsRuntime(
+        store=SnapshotStore(_store_path(db_type)),
+        periodic_seconds=(6 * 60 * 60) + (index * 5 * 60),
+    )
+    for index, db_type in enumerate(SUPPORTED_SESSIONS)
+}
+
+
+def _normalize_session(value):
+    db_type = str(value or "general").strip().lower()
+    return db_type if db_type in SUPPORTED_SESSIONS else None
+
+
+def _runtime_for(db_type):
+    normalized = _normalize_session(db_type)
+    return _RUNTIMES.get(normalized) if normalized else None
 
 
 class StatisticsMetadataProvider(BaseMetadataProvider):
@@ -33,7 +49,7 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
         "title": "통계",
         "icon": "fa-solid fa-chart-pie",
         "order": 82,
-        "sessions": ["general"],
+        "sessions": "all",
     }
     update_manifest = None
 
@@ -43,16 +59,25 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
     def apply(self, db_type, book_id, item_data):
         return False, "통계 플러그인은 메타데이터 적용 기능을 제공하지 않습니다."
 
+    def _aggregate_session(self, db_type):
+        gateway = self.get_db_gateway(db_type)
+        if db_type in {"general", "adult"}:
+            return StatisticsAggregator(gateway, session_type=db_type).aggregate()
+        return MediaStatisticsAggregator(gateway, db_type).aggregate()
+
     def start_background_service(self, db_type):
-        if str(db_type or "general").strip().lower() != "general":
-            return None
-        _RUNTIME.start(_aggregate_general, initial_delay=3)
+        for index, session_type in enumerate(SUPPORTED_SESSIONS):
+            _RUNTIMES[session_type].start(
+                lambda session_type=session_type: self._aggregate_session(session_type),
+                initial_delay=3 + (index * 12),
+            )
         return None
 
     def on_scan_new_books_detected(self, db_type, payload):
-        if str(db_type or "general").strip().lower() != "general":
-            return {"success": True, "skipped": True, "message": "general DB만 지원합니다."}
-        _RUNTIME.request_refresh(delay=45, debounce=True)
+        runtime = _runtime_for(db_type)
+        if runtime is None:
+            return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
+        runtime.request_refresh(delay=45, debounce=True)
         return {
             "success": True,
             "scheduled": True,
@@ -60,26 +85,28 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
         }
 
     def get_dashboard_data(self, db_type, limit=10):
-        if str(db_type or "general").strip().lower() != "general":
-            return {"success": False, "error": "general DB만 지원합니다."}
-        return {"success": True, **_RUNTIME.get_state()}
+        runtime = _runtime_for(db_type)
+        if runtime is None:
+            return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
+        return {"success": True, **runtime.get_state()}
 
     def run_context_menu_action(self, db_type, action_id, context):
         if action_id != "statistics_rpc":
             return {"success": False, "error": "지원하지 않는 통계 요청입니다."}
-        if str(db_type or "general").strip().lower() != "general":
-            return {"success": False, "error": "general DB만 지원합니다."}
+        runtime = _runtime_for(db_type)
+        if runtime is None:
+            return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
 
         context = context or {}
         op = str(context.get("op") or "snapshot").strip().lower()
         if op in {"snapshot", "status"}:
-            return {"success": True, **_RUNTIME.get_state()}
+            return {"success": True, **runtime.get_state()}
         if op == "refresh":
-            accepted = _RUNTIME.request_refresh(delay=0, debounce=False)
+            accepted = runtime.request_refresh(delay=0, debounce=False)
             return {
                 "success": True,
                 "accepted": bool(accepted),
                 "message": "통계 재집계를 요청했습니다.",
-                **_RUNTIME.get_state(),
+                **runtime.get_state(),
             }
         return {"success": False, "error": f"지원하지 않는 작업입니다: {op}"}
