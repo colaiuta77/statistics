@@ -1,0 +1,2 @@
+# statistics
+bookoasis statistics plugin
