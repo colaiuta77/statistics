@@ -9,7 +9,7 @@ from plugins.metadata.base import BaseMetadataProvider
 from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.1.1"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
@@ -67,13 +67,21 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
             return StatisticsAggregator(gateway, session_type=db_type).aggregate()
         return MediaStatisticsAggregator(gateway, db_type).aggregate()
 
+    def _get_or_start_runtime(self, db_type, initial_delay=0):
+        session_type = _normalize_session(db_type)
+        if session_type is None:
+            return None
+        runtime = _RUNTIMES[session_type]
+        runtime.start(
+            lambda session_type=session_type: self._aggregate_session(session_type),
+            initial_delay=initial_delay,
+        )
+        return runtime
+
     def start_background_service(self, db_type):
         for index, session_type in enumerate(SUPPORTED_SESSIONS):
             try:
-                _RUNTIMES[session_type].start(
-                    lambda session_type=session_type: self._aggregate_session(session_type),
-                    initial_delay=3 + (index * 12),
-                )
+                self._get_or_start_runtime(session_type, initial_delay=3 + (index * 12))
             except Exception:
                 logger.exception("통계 세션 백그라운드 서비스 시작 실패: %s", session_type)
         return None
@@ -90,7 +98,7 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
         }
 
     def get_dashboard_data(self, db_type, limit=10):
-        runtime = _runtime_for(db_type)
+        runtime = self._get_or_start_runtime(db_type)
         if runtime is None:
             return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
         return {"success": True, **runtime.get_state()}
@@ -98,7 +106,7 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
     def run_context_menu_action(self, db_type, action_id, context):
         if action_id != "statistics_rpc":
             return {"success": False, "error": "지원하지 않는 통계 요청입니다."}
-        runtime = _runtime_for(db_type)
+        runtime = self._get_or_start_runtime(db_type)
         if runtime is None:
             return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
 

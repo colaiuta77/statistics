@@ -2,15 +2,15 @@
 
 BookOasis 일반·성인 도서, 오디오북과 비디오 라이브러리를 백그라운드에서 미리 집계하고, 저장된 스냅샷을 ECharts 기반 대시보드로 빠르게 보여주는 독립 카테고리 플러그인입니다.
 
-![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.1.0)
+![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.1.1)
 
-![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.1.0)
+![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.1.1)
 
 ## 버전 및 호환 정보
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.1.0` |
+| 플러그인 버전 | `1.1.1` |
 | 플러그인 ID | `statistics` |
 | 클래스 | `StatisticsMetadataProvider` |
 | 모듈 | `plugins.metadata.statistics.statistics` |
@@ -74,7 +74,7 @@ BookOasis `2.4.7`의 최신 `plugins/metadata/base.py`에 포함된 `start_backg
 
 ## 집계 방식
 
-플러그인 시작 시 `start_background_service()`가 통계 런타임을 시작합니다. 최초 집계는 BookOasis 시작 직후 약간의 지연 뒤 실행되고, 성공한 결과는 다음 위치의 SQLite 스냅샷에 저장됩니다.
+플러그인 시작 시 `start_background_service()`가 통계 런타임을 시작합니다. `1.1.1`부터는 화면의 상태 요청도 현재 세션 런타임을 멱등하게 시작하므로 시작 훅이 누락된 환경에서 무한 대기하지 않습니다. 최초 집계는 BookOasis 시작 직후 약간의 지연 뒤 실행되고, 성공한 결과는 다음 위치의 SQLite 스냅샷에 저장됩니다.
 
 ```text
 plugins/data/statistics/statistics.db
@@ -146,9 +146,55 @@ git clone https://github.com/colaiuta77/statistics.git statistics
 git -C statistics pull --ff-only
 ```
 
-현재 `1.1.0`은 `update_manifest` 자동 업데이트 계약을 선언하지 않으므로 Git 기반 업데이트를 사용합니다.
+현재 `1.1.1`은 `update_manifest` 자동 업데이트 계약을 선언하지 않으므로 Git 기반 업데이트를 사용합니다.
 
 Docker 환경에서는 BookOasis `plugins` 디렉터리가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다.
+
+### Docker 전체 plugins 볼륨의 구형 base.py 복구
+
+`/app/plugins` 전체를 호스트 볼륨으로 연결하면 BookOasis 이미지가 갱신되어도 볼륨에 이미 존재하는 `plugins/metadata/base.py`는 유지될 수 있습니다. 다음 확인 결과가 `False`이면 현재 컨테이너가 구형 플러그인 계약을 로드한 상태입니다.
+
+```bash
+CONTAINER=bookoasis
+docker exec "$CONTAINER" python -c "from plugins.metadata.base import BaseMetadataProvider as B; print(hasattr(B, 'start_background_service'))"
+```
+
+BookOasis `2.4.7` 이상에서는 다음 명령으로 기존 파일을 볼륨 내부에 백업하고 현재 이미지의 기본 원본으로 교체할 수 있습니다. 컨테이너 이름이 다르면 `CONTAINER` 값만 변경합니다.
+
+```bash
+CONTAINER=bookoasis
+if docker exec "$CONTAINER" sh -lc '
+set -eu
+src=/app/_plugin_framework_defaults/base.py
+dst=/app/plugins/metadata/base.py
+backup_dir=/app/plugins/.framework-backups
+grep -q "def start_background_service" "$src"
+if ! grep -q "def start_background_service" "$dst" 2>/dev/null; then
+  stamp=$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$backup_dir"
+  cp -a "$dst" "$backup_dir/base.py-$stamp"
+  tmp="${dst}.new.$$"
+  trap "rm -f \"$tmp\"" EXIT
+  cp -a "$src" "$tmp"
+  mv -f "$tmp" "$dst"
+  trap - EXIT
+  echo "base.py 교체 완료. 백업 위치: $backup_dir/base.py-$stamp"
+else
+  echo "현재 base.py는 이미 호환됩니다."
+  exit 20
+fi
+'; then
+  docker restart "$CONTAINER"
+else
+  status=$?
+  if [ "$status" -ne 20 ]; then
+    echo "base.py 교체에 실패했습니다." >&2
+    false
+  fi
+fi
+```
+
+통계 플러그인의 자체 시작 보완은 통계 화면의 무한 대기를 방지하는 안전장치입니다. 다른 플러그인도 동일한 계약을 사용할 수 있으므로 최신 `base.py` 적용은 계속 권장합니다.
 
 ## 데이터와 성능
 
@@ -184,6 +230,11 @@ node --check script.js
 개발 과정에서는 백그라운드 스냅샷, MariaDB SQL dialect, 보관함별 scope, 메타데이터 누락 계산, Heatmap 스크롤, MB/GB 축 변환과 드래그 카드 레이아웃에 대한 회귀 테스트를 수행했습니다. 개발용 테스트와 NAS 적용 스크립트는 GitHub 배포본에 포함하지 않습니다.
 
 ## 변경 이력
+
+### 1.1.1 - 2026-08-30
+
+- 화면의 통계 상태 요청이 현재 세션 런타임을 자체 시작하도록 보완했습니다.
+- 전체 `plugins` 볼륨에 남은 구형 `base.py`의 확인, 백업과 복구 절차를 추가했습니다.
 
 ### 1.1.0 - 2026-08-29
 
