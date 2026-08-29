@@ -1,0 +1,116 @@
+<div class="bo-stats" data-statistics-root>
+  <section class="bo-stats__hero">
+    <div>
+      <div class="bo-stats__eyebrow">LIBRARY INSIGHTS</div>
+      <h1>통계</h1>
+      <p>BookOasis 라이브러리를 백그라운드에서 미리 집계한 결과입니다.</p>
+    </div>
+    <div class="bo-stats__controls">
+      <label class="bo-stats__select-wrap">
+        <span>보관함</span>
+        <select data-role="library-select" aria-label="통계 보관함 선택">
+          <option value="all">전체 보관함</option>
+        </select>
+      </label>
+      <button class="bo-stats__refresh" type="button" data-role="refresh">
+        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+        <span>통계 갱신</span>
+      </button>
+      <button class="bo-stats__layout-reset" type="button" data-role="layout-reset" title="통계 카드 순서를 기본값으로 되돌립니다.">
+        <i class="fa-solid fa-table-cells-large" aria-hidden="true"></i>
+        <span>레이아웃 초기화</span>
+      </button>
+    </div>
+  </section>
+
+  <div class="bo-stats__status" data-role="status" aria-live="polite">
+    <span class="bo-stats__status-dot"></span>
+    <span data-role="status-text">저장된 통계를 불러오는 중...</span>
+  </div>
+
+  <section class="bo-stats__kpis" data-role="kpis" aria-label="라이브러리 요약"></section>
+
+  <section class="bo-stats__empty" data-role="empty" hidden>
+    <div class="bo-stats__empty-icon"><i class="fa-solid fa-chart-column"></i></div>
+    <h2>통계 집계 준비 중</h2>
+    <p>최초 집계는 백그라운드에서 실행됩니다. 이 화면을 열어둔 상태에서도 완료되면 자동으로 표시됩니다.</p>
+  </section>
+
+  <section class="bo-stats__charts" data-role="charts" hidden>
+    <article class="bo-stats__card" data-card="format">
+      <header><div><span class="bo-stats__card-kicker">LIBRARY</span><h2>포맷 분포</h2></div></header>
+      <div class="bo-stats__chart" data-chart="format"></div>
+    </article>
+    <article class="bo-stats__card" data-card="metadata-gauge">
+      <header><div><span class="bo-stats__card-kicker">QUALITY</span><h2>메타데이터 완성도</h2></div></header>
+      <div class="bo-stats__chart" data-chart="metadata-gauge"></div>
+    </article>
+    <article class="bo-stats__card" data-card="metadata-score">
+      <header><div><span class="bo-stats__card-kicker">QUALITY</span><h2>메타데이터 점수</h2></div></header>
+      <div class="bo-stats__chart" data-chart="metadata-score"></div>
+    </article>
+
+    <article class="bo-stats__card bo-stats__card--wide" data-card="genres">
+      <header><div><span class="bo-stats__card-kicker">DISCOVERY</span><h2>장르 분포</h2></div><span class="bo-stats__card-note">상위 25개</span></header>
+      <div class="bo-stats__chart bo-stats__chart--tall" data-chart="genres"></div>
+    </article>
+    <article class="bo-stats__card" data-card="largest">
+      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서</h2></div></header>
+      <div class="bo-stats__chart bo-stats__chart--tall" data-chart="largest"></div>
+    </article>
+
+    <article class="bo-stats__card bo-stats__card--wide bo-stats__card--double" data-card="metadata-heatmap">
+      <header><div><span class="bo-stats__card-kicker">QUALITY</span><h2>보관함별 메타데이터 완성도</h2></div></header>
+      <div class="bo-stats__chart bo-stats__chart--heatmap" data-chart="metadata-heatmap"></div>
+    </article>
+    <article class="bo-stats__card" data-card="storage-format">
+      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>포맷별 저장 공간</h2></div></header>
+      <div class="bo-stats__chart" data-chart="storage-format"></div>
+    </article>
+
+    <article class="bo-stats__card bo-stats__card--genre-chord bo-stats__card--double" data-card="genre-chord">
+      <header><div><span class="bo-stats__card-kicker">RELATIONSHIPS</span><h2>장르 연관성</h2></div><span class="bo-stats__card-note">동시에 지정된 상위 장르</span></header>
+      <div class="bo-stats__chart bo-stats__chart--genre-chord" data-chart="genre-chord"></div>
+    </article>
+    <article class="bo-stats__card" data-card="top-series">
+      <header><div><span class="bo-stats__card-kicker">CATALOG</span><h2>상위 시리즈</h2></div></header>
+      <div class="bo-stats__chart bo-stats__chart--tall" data-chart="top-series"></div>
+    </article>
+
+    <article class="bo-stats__card bo-stats__card--wide" data-card="added-time">
+      <header><div><span class="bo-stats__card-kicker">GROWTH</span><h2>도서 추가 추이</h2></div><span class="bo-stats__card-note">최근 최대 60개월</span></header>
+      <div class="bo-stats__chart" data-chart="added-time"></div>
+    </article>
+    <article class="bo-stats__card" data-card="top-authors">
+      <header><div><span class="bo-stats__card-kicker">CATALOG</span><h2>상위 저자</h2></div></header>
+      <div class="bo-stats__chart bo-stats__chart--tall" data-chart="top-authors"></div>
+    </article>
+
+    <article class="bo-stats__card" data-card="publication-decade">
+      <header><div><span class="bo-stats__card-kicker">PUBLICATION</span><h2>출판 시대</h2></div></header>
+      <div class="bo-stats__chart" data-chart="publication-decade"></div>
+    </article>
+    <article class="bo-stats__card" data-card="page-count">
+      <header><div><span class="bo-stats__card-kicker">LENGTH</span><h2>페이지 수 분포</h2></div></header>
+      <div class="bo-stats__chart" data-chart="page-count"></div>
+    </article>
+    <article class="bo-stats__card" data-card="top-publishers">
+      <header><div><span class="bo-stats__card-kicker">CATALOG</span><h2>상위 출판사</h2></div></header>
+      <div class="bo-stats__chart" data-chart="top-publishers"></div>
+    </article>
+
+    <article class="bo-stats__card" data-card="metadata-missing">
+      <header><div><span class="bo-stats__card-kicker">QUALITY</span><h2>메타데이터 누락 현황</h2></div></header>
+      <div class="bo-stats__chart" data-chart="metadata-missing"></div>
+    </article>
+
+    <article class="bo-stats__card bo-stats__card--full" data-card="publication-timeline">
+      <header><div><span class="bo-stats__card-kicker">PUBLICATION</span><h2>출판 연도 타임라인</h2></div></header>
+      <div class="bo-stats__chart" data-chart="publication-timeline"></div>
+    </article>
+    <article class="bo-stats__card bo-stats__card--full" data-card="format-time">
+      <header><div><span class="bo-stats__card-kicker">GROWTH</span><h2>포맷 비중 변화</h2></div><span class="bo-stats__card-note">최근 최대 60개월</span></header>
+      <div class="bo-stats__chart" data-chart="format-time"></div>
+    </article>
+  </section>
+</div>
