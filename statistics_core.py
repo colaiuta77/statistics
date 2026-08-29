@@ -950,7 +950,7 @@ class MediaStatisticsAggregator:
             """,
         )
 
-    def _metadata_rows(self, libraries, items, bytes_by_item):
+    def _metadata_rows(self, libraries, items, bytes_by_item, count_by_item):
         fields = self.schema["metadata_fields"]
         rows = []
         for library in libraries:
@@ -960,14 +960,16 @@ class MediaStatisticsAggregator:
             for key, _label in fields:
                 if key == "file_size":
                     row[key] = sum(1 for item in selected if bytes_by_item.get(_int(item.get("id")), 0) > 0)
-                elif key in {"duration_seconds", "child_count"}:
+                elif key == "child_count":
+                    row[key] = sum(1 for item in selected if count_by_item.get(_int(item.get("id")), 0) > 0)
+                elif key == "duration_seconds":
                     row[key] = sum(1 for item in selected if float(item.get(key) or 0) > 0)
                 else:
                     row[key] = sum(1 for item in selected if normalize_token(item.get(key)))
             rows.append(row)
         return rows
 
-    def _score_rows(self, items, bytes_by_item):
+    def _score_rows(self, items, bytes_by_item, count_by_item):
         fields = self.schema["metadata_fields"]
         counter = Counter()
         for item in items:
@@ -975,7 +977,9 @@ class MediaStatisticsAggregator:
             for key, _label in fields:
                 if key == "file_size":
                     present = bytes_by_item.get(_int(item.get("id")), 0) > 0
-                elif key in {"duration_seconds", "child_count"}:
+                elif key == "child_count":
+                    present = count_by_item.get(_int(item.get("id")), 0) > 0
+                elif key == "duration_seconds":
                     present = float(item.get(key) or 0) > 0
                 else:
                     present = bool(normalize_token(item.get(key)))
@@ -986,11 +990,13 @@ class MediaStatisticsAggregator:
             for (library_id, filled), count in sorted(counter.items())
         ]
 
-    def _count_distribution(self, items):
+    def _count_distribution(self, items, count_by_item):
         labels = [label for _limit, label in self.schema["count_buckets"]] + ["21+"]
         counts = Counter()
         for item in items:
-            value = _int(item.get("child_count"))
+            value = count_by_item.get(_int(item.get("id")), 0)
+            if value <= 0:
+                continue
             label = "21+"
             for limit, candidate in self.schema["count_buckets"]:
                 if value <= limit:
@@ -1007,11 +1013,14 @@ class MediaStatisticsAggregator:
         file_rows = [dict(row) for row in self._load_files()]
         item_by_id = {_int(item.get("id")): item for item in items}
         bytes_by_item = Counter()
+        count_by_item = Counter()
         for row in file_rows:
-            bytes_by_item[_int(row.get("item_id"))] += _int(row.get("bytes"))
+            item_id = _int(row.get("item_id"))
+            bytes_by_item[item_id] += _int(row.get("bytes"))
+            count_by_item[item_id] += _int(row.get("count"))
 
-        metadata = self._metadata_rows(libraries, items, bytes_by_item)
-        scores = self._score_rows(items, bytes_by_item)
+        metadata = self._metadata_rows(libraries, items, bytes_by_item, count_by_item)
+        scores = self._score_rows(items, bytes_by_item, count_by_item)
         metadata_by_library = _group_by_library(metadata)
         scores_by_library = _group_by_library(scores)
         fields = self.schema["metadata_fields"]
@@ -1050,7 +1059,7 @@ class MediaStatisticsAggregator:
 
             summary = {
                 "item_count": len(selected_items),
-                "child_count": sum(_int(item.get("child_count")) for item in selected_items),
+                "child_count": sum(_int(row.get("count")) for row in selected_files),
                 "author_count": len({normalize_token(item.get("author")).casefold() for item in selected_items if normalize_token(item.get("author"))}),
                 "publisher_count": len({normalize_token(item.get("publisher")).casefold() for item in selected_items if normalize_token(item.get("publisher"))}),
                 "storage_bytes": sum(_int(row.get("bytes")) for row in selected_files),
@@ -1079,7 +1088,7 @@ class MediaStatisticsAggregator:
                 "format_share_over_time": format_over_time,
                 "publication_decade": release_stats["decades"],
                 "publication_year_timeline": release_stats["timeline"],
-                "page_count_distribution": self._count_distribution(selected_items),
+                "page_count_distribution": self._count_distribution(selected_items, count_by_item),
                 "largest_books": [
                     {
                         "id": _int(item.get("id")),

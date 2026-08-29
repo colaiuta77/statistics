@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """BookOasis local library statistics plugin."""
 
+import logging
 import os
 
 from plugins.metadata.base import BaseMetadataProvider
@@ -12,6 +13,7 @@ PLUGIN_VERSION = "1.1.0"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
+logger = logging.getLogger(__name__)
 
 
 def _store_path(db_type):
@@ -67,10 +69,13 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
 
     def start_background_service(self, db_type):
         for index, session_type in enumerate(SUPPORTED_SESSIONS):
-            _RUNTIMES[session_type].start(
-                lambda session_type=session_type: self._aggregate_session(session_type),
-                initial_delay=3 + (index * 12),
-            )
+            try:
+                _RUNTIMES[session_type].start(
+                    lambda session_type=session_type: self._aggregate_session(session_type),
+                    initial_delay=3 + (index * 12),
+                )
+            except Exception:
+                logger.exception("통계 세션 백그라운드 서비스 시작 실패: %s", session_type)
         return None
 
     def on_scan_new_books_detected(self, db_type, payload):

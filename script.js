@@ -13,6 +13,7 @@
   const SUPPORTED_SESSIONS = new Set(['general', 'adult', 'audiobook', 'video']);
   const rawSessionType = String(window.currentLibraryType || 'general').trim().toLowerCase();
   const SESSION_TYPE = SUPPORTED_SESSIONS.has(rawSessionType) ? rawSessionType : 'general';
+  const ITEM_UNIT = SESSION_TYPE === 'general' || SESSION_TYPE === 'adult' ? '권' : '개';
   const CARD_ORDER_KEY = `bookoasis.statistics.cardOrder.v2.${SESSION_TYPE}`;
   const SESSION_UI = {
     general: { hidden: [], titles: {} },
@@ -281,6 +282,10 @@
 
   function formatNumber(value) {
     return new Intl.NumberFormat('ko-KR').format(Number(value || 0));
+  }
+
+  function formatItemCount(value) {
+    return formatNumber(value) + ITEM_UNIT;
   }
 
   function formatBytes(value) {
@@ -630,7 +635,7 @@
     const genres = scope.genre_distribution || [];
     if (genres.length) {
       makeChart('genres', Object.assign(baseOption(), {
-        tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.name)}<br><b>${formatNumber(p.value)}권</b>` },
+        tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.name)}<br><b>${formatItemCount(p.value)}</b>` },
         series: [{ type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, label: { show: true, color: '#fff', fontSize: 11 }, upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 }, data: genres.map((row) => ({ name: row.label, value: row.count })) }]
       }));
     } else emptyChart('genres');
@@ -693,12 +698,12 @@
     const chord = scope.genre_cooccurrence || {};
     if ((chord.nodes || []).length > 1 && (chord.links || []).length) {
       makeChart('genre-chord', Object.assign(baseOption(), {
-        tooltip: { ...baseOption().tooltip, formatter: (p) => p.dataType === 'edge' ? `${escapeTooltip(p.data.source)} ↔ ${escapeTooltip(p.data.target)}<br><b>${formatNumber(p.data.value)}권</b>` : `${escapeTooltip(p.name)}<br><b>${formatNumber(p.data.value)}권</b>` },
+        tooltip: { ...baseOption().tooltip, formatter: (p) => p.dataType === 'edge' ? `${escapeTooltip(p.data.source)} ↔ ${escapeTooltip(p.data.target)}<br><b>${formatItemCount(p.data.value)}</b>` : `${escapeTooltip(p.name)}<br><b>${formatItemCount(p.data.value)}</b>` },
         series: [{ type: 'chord', clockwise: false, radius: ['22%', '67%'], center: ['50%', '51%'], label: { show: true, color: t.secondary, fontSize: 9 }, lineStyle: { color: 'target', opacity: .55 }, emphasis: { focus: 'adjacency' }, data: chord.nodes, links: chord.links }]
       }));
-    } else emptyChart('genre-chord', '두 개 이상의 장르가 함께 지정된 도서가 충분하지 않습니다.');
+    } else emptyChart('genre-chord', '두 개 이상의 장르가 함께 지정된 항목이 충분하지 않습니다.');
 
-    if ((scope.top_series || []).length) makeChart('top-series', horizontalBarOption(scope.top_series, (v) => formatNumber(v) + '권', 15));
+    if ((scope.top_series || []).length) makeChart('top-series', horizontalBarOption(scope.top_series, formatItemCount, 15));
     else emptyChart('top-series');
 
     const added = scope.books_added_over_time || [];
@@ -713,7 +718,7 @@
       }));
     } else emptyChart('added-time');
 
-    if ((scope.top_authors || []).length) makeChart('top-authors', horizontalBarOption(scope.top_authors, (v) => formatNumber(v) + '권', 15));
+    if ((scope.top_authors || []).length) makeChart('top-authors', horizontalBarOption(scope.top_authors, formatItemCount, 15));
     else emptyChart('top-authors');
 
     const decades = scope.publication_decade || [];
@@ -738,11 +743,11 @@
       }));
     } else emptyChart('page-count');
 
-    if ((scope.top_publishers || []).length) makeChart('top-publishers', horizontalBarOption(scope.top_publishers, (v) => formatNumber(v) + '권', 15));
+    if ((scope.top_publishers || []).length) makeChart('top-publishers', horizontalBarOption(scope.top_publishers, formatItemCount, 15));
     else emptyChart('top-publishers');
 
     const metadataMissing = scope.metadata_missing || [];
-    if (metadataMissing.length) makeChart('metadata-missing', horizontalBarOption(metadataMissing, (v) => formatNumber(v) + '권', 8));
+    if (metadataMissing.length) makeChart('metadata-missing', horizontalBarOption(metadataMissing, formatItemCount, 8));
     else emptyChart('metadata-missing', '누락된 주요 메타데이터가 없습니다.');
 
     const years = scope.publication_year_timeline || [];
