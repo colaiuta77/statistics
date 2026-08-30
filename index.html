@@ -20,6 +20,14 @@
         <i class="fa-solid fa-table-cells-large" aria-hidden="true"></i>
         <span>레이아웃 초기화</span>
       </button>
+      <details class="bo-stats__settings" data-role="card-settings">
+        <summary><i class="fa-solid fa-sliders" aria-hidden="true"></i><span>카드 설정</span></summary>
+        <div class="bo-stats__settings-panel">
+          <p>현재 세션의 표시 설정을 이 브라우저에 저장합니다.</p>
+          <fieldset data-role="kpi-toggles"><legend>요약 카드</legend></fieldset>
+          <fieldset data-role="chart-toggles"><legend>차트 카드</legend></fieldset>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -51,12 +59,16 @@
     </article>
 
     <article class="bo-stats__card bo-stats__card--wide" data-card="genres">
-      <header><div><span class="bo-stats__card-kicker">DISCOVERY</span><h2>장르 분포</h2></div><span class="bo-stats__card-note">상위 25개</span></header>
+      <header><div><span class="bo-stats__card-kicker">DISCOVERY</span><h2>장르 분포</h2></div><div class="bo-stats__card-options"><span class="bo-stats__card-note">상위 60개</span><select data-role="distribution-mode" data-chart-select="distribution-mode" aria-label="분포 기준"><option value="genre">장르</option><option value="tags">태그</option></select></div></header>
       <div class="bo-stats__chart bo-stats__chart--tall" data-chart="genres"></div>
     </article>
     <article class="bo-stats__card" data-card="largest">
-      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서</h2></div></header>
+      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서</h2></div><span class="bo-stats__card-note">상위 50개</span></header>
       <div class="bo-stats__chart bo-stats__chart--tall" data-chart="largest"></div>
+    </article>
+    <article class="bo-stats__card bo-stats__card--wide" data-card="largest-treemap">
+      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서 · 트리맵</h2></div><div class="bo-stats__card-options"><span class="bo-stats__card-note">상위 100개</span><select data-role="treemap-mode" data-chart-select="treemap-mode" aria-label="용량 트리맵 표시 기준"><option value="format">포맷별</option><option value="size">용량순</option></select></div></header>
+      <div class="bo-stats__chart" data-chart="largest-treemap"></div>
     </article>
 
     <article class="bo-stats__card bo-stats__card--wide bo-stats__card--double" data-card="metadata-heatmap">
@@ -104,6 +116,11 @@
       <div class="bo-stats__chart" data-chart="metadata-missing"></div>
     </article>
 
+    <article class="bo-stats__card" data-card="reading-weekdays">
+      <header><div><span class="bo-stats__card-kicker">READING</span><h2>요일별 독서 패턴</h2></div><span class="bo-stats__card-note" data-role="weekday-summary" aria-live="polite" title="일별 읽은 권수의 합계입니다. 같은 책을 여러 날 읽으면 각각 합산합니다.">내 독서 기록</span></header>
+      <div class="bo-stats__chart" data-chart="reading-weekdays"></div>
+    </article>
+
     <article class="bo-stats__card bo-stats__card--full" data-card="publication-timeline">
       <header><div><span class="bo-stats__card-kicker">PUBLICATION</span><h2>출판 연도 타임라인</h2></div></header>
       <div class="bo-stats__chart" data-chart="publication-timeline"></div>
@@ -113,4 +130,10 @@
       <div class="bo-stats__chart" data-chart="format-time"></div>
     </article>
   </section>
+  <article class="bo-stats__card bo-stats__card--full bo-stats__card--calendar" data-card="reading-calendar" hidden>
+    <header><div><span class="bo-stats__card-kicker">READING</span><h2>도서 읽은 날</h2></div><span class="bo-stats__card-note" data-role="calendar-summary" aria-live="polite">내 독서 기록</span></header>
+    <div class="bo-stats__calendar-scroll" tabindex="0" role="region" aria-label="연간 독서 달력. 좁은 화면에서는 좌우로 스크롤할 수 있습니다.">
+      <div class="bo-stats__chart" data-chart="reading-calendar"></div>
+    </div>
+  </article>
 </div>

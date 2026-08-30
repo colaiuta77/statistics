@@ -15,14 +15,16 @@
   const SESSION_TYPE = SUPPORTED_SESSIONS.has(rawSessionType) ? rawSessionType : 'general';
   const ITEM_UNIT = SESSION_TYPE === 'general' || SESSION_TYPE === 'adult' ? '권' : '개';
   const CARD_ORDER_KEY = `bookoasis.statistics.cardOrder.v2.${SESSION_TYPE}`;
+  const HIDDEN_CARDS_KEY = `bookoasis.statistics.hiddenCards.v1.${SESSION_TYPE}`;
   const SESSION_UI = {
     general: { hidden: [], titles: {} },
     adult: { hidden: [], titles: {} },
     audiobook: {
-      hidden: ['genres', 'genre-chord', 'top-series'],
+      hidden: ['genres', 'genre-chord', 'top-series', 'reading-weekdays'],
       titles: {
         format: '트랙 포맷 분포',
         largest: '용량이 큰 오디오북',
+        'largest-treemap': '용량이 큰 오디오북 · 트리맵',
         'storage-format': '트랙 포맷별 저장 공간',
         'added-time': '오디오북 추가 추이',
         'publication-decade': '출시 시대',
@@ -32,10 +34,11 @@
       }
     },
     video: {
-      hidden: ['top-authors', 'top-series', 'top-publishers'],
+      hidden: ['top-authors', 'top-series', 'top-publishers', 'reading-weekdays'],
       titles: {
         format: '에피소드 포맷 분포',
         largest: '용량이 큰 비디오',
+        'largest-treemap': '용량이 큰 비디오 · 트리맵',
         'storage-format': '에피소드 포맷별 저장 공간',
         'added-time': '비디오 추가 추이',
         'publication-decade': '출시 시대',
@@ -48,15 +51,31 @@
   const selectEl = root.querySelector('[data-role="library-select"]');
   const refreshEl = root.querySelector('[data-role="refresh"]');
   const layoutResetEl = root.querySelector('[data-role="layout-reset"]');
+  const cardSettingsEl = root.querySelector('[data-role="card-settings"]');
+  const treemapModeEl = root.querySelector('[data-role="treemap-mode"]');
+  const distributionModeEl = root.querySelector('[data-role="distribution-mode"]');
+  if (!['general', 'adult'].includes(SESSION_TYPE)) {
+    distributionModeEl.querySelector('[value="tags"]').remove();
+    distributionModeEl.hidden = true;
+  }
   const statusEl = root.querySelector('[data-role="status"]');
   const statusTextEl = root.querySelector('[data-role="status-text"]');
   const kpisEl = root.querySelector('[data-role="kpis"]');
   const chartsEl = root.querySelector('[data-role="charts"]');
   const emptyEl = root.querySelector('[data-role="empty"]');
+  const calendarCard = root.querySelector('[data-card="reading-calendar"]');
+  const calendarSummary = root.querySelector('[data-role="calendar-summary"]');
+  const weekdayCard = root.querySelector('[data-card="reading-weekdays"]');
+  const weekdaySummary = root.querySelector('[data-role="weekday-summary"]');
+  if (calendarCard) calendarCard.hidden = !['general', 'adult'].includes(SESSION_TYPE);
   const charts = new Map();
   const layoutMedia = window.matchMedia('(min-width: 721px)');
   applySessionUi();
   const defaultCardOrder = Array.from(chartsEl.querySelectorAll('[data-card]:not([hidden])')).map((el) => el.dataset.card);
+  const supportedCardIds = new Set(defaultCardOrder);
+  if (calendarCard && !calendarCard.hidden) supportedCardIds.add('reading-calendar');
+  const hiddenCards = new Set(readStoredIds(HIDDEN_CARDS_KEY));
+  let cardOrder = defaultCardOrder.slice();
   let cardGrid = null;
   let cardResizeObserver = null;
   let layoutRefreshFrame = 0;
@@ -64,6 +83,8 @@
   let currentScopeId = 'all';
   let pollTimer = null;
   let disposed = false;
+  let calendarState = null;
+  let calendarRequest = 0;
 
   function applySessionUi() {
     const settings = SESSION_UI[SESSION_TYPE] || SESSION_UI.general;
@@ -102,9 +123,9 @@
     return window.__bookoasisStatisticsMuuriPromise;
   }
 
-  function readStoredCardOrder() {
+  function readStoredIds(key) {
     try {
-      const parsed = JSON.parse(window.localStorage.getItem(CARD_ORDER_KEY) || '[]');
+      const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
       return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
     } catch (_) {
       return [];
@@ -125,6 +146,7 @@
       const el = byId.get(cardId);
       if (el && !seen.has(cardId)) chartsEl.appendChild(el);
     });
+    cardOrder = Array.from(chartsEl.querySelectorAll('[data-card]')).map(el => el.dataset.card).filter(id => supportedCardIds.has(id));
   }
 
   function prepareCardDragHandles() {
@@ -149,7 +171,10 @@
     const order = cardGrid
       ? cardGrid.getItems().map((item) => item.getElement().dataset.card).filter(Boolean)
       : Array.from(chartsEl.querySelectorAll('[data-card]')).map((el) => el.dataset.card);
-    try { window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(order)); } catch (_) {}
+    const moved = new Set(order);
+    let index = 0;
+    cardOrder = cardOrder.map(id => moved.has(id) ? order[index++] : id);
+    try { window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(cardOrder)); } catch (_) {}
   }
 
   function resizeAllCharts() {
@@ -204,6 +229,7 @@
     try { cardGrid.destroy(); } catch (_) {}
     cardGrid = null;
     chartsEl.classList.remove('bo-stats__charts--muuri');
+    reorderCardDom(cardOrder);
     resizeAllCharts();
   }
 
@@ -260,7 +286,68 @@
     syncCardLayoutMode();
   }
 
-  reorderCardDom(readStoredCardOrder());
+  function applyCardVisibility() {
+    root.querySelectorAll('[data-card]').forEach(card => {
+      const id = card.dataset.card;
+      card.hidden = !supportedCardIds.has(id) || hiddenCards.has(id);
+      if (card.hidden) card.querySelectorAll('[data-chart]').forEach(el => disposeChart(el.dataset.chart));
+    });
+  }
+
+  function buildCardSettings() {
+    if (!cardSettingsEl) return;
+    const addToggle = (group, id, title) => {
+      const label = document.createElement('label');
+      const text = document.createElement('span');
+      text.textContent = title;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('role', 'switch');
+      input.dataset.cardToggle = id;
+      input.checked = !hiddenCards.has(id);
+      label.append(text, input);
+      group.appendChild(label);
+    };
+    const kpiGroup = cardSettingsEl.querySelector('[data-role="kpi-toggles"]');
+    kpiItems({}).forEach(([id, , title]) => {
+      supportedCardIds.add('kpi-' + id);
+      addToggle(kpiGroup, 'kpi-' + id, title);
+    });
+    const chartGroup = cardSettingsEl.querySelector('[data-role="chart-toggles"]');
+    root.querySelectorAll('article[data-card]').forEach(card => {
+      if (supportedCardIds.has(card.dataset.card)) addToggle(chartGroup, card.dataset.card, card.querySelector('h2').textContent);
+    });
+    cardSettingsEl.addEventListener('change', event => {
+      const input = event.target.closest('[data-card-toggle]');
+      if (!input) return;
+      const id = input.dataset.cardToggle;
+      if (input.checked) hiddenCards.delete(id);
+      else hiddenCards.add(id);
+      try { window.localStorage.setItem(HIDDEN_CARDS_KEY, JSON.stringify([...hiddenCards])); } catch (_) {}
+      destroyCardGrid();
+      applyCardVisibility();
+      syncCardLayoutMode();
+      if (latestState && latestState.snapshot) {
+        const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
+        renderCharts(scope);
+      }
+      if (id === 'reading-calendar' || id === 'reading-weekdays') {
+        calendarRequest++;
+        calendarState = null;
+        refreshReadingCalendar(true);
+      }
+    });
+    cardSettingsEl.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        cardSettingsEl.open = false;
+        cardSettingsEl.querySelector('summary').focus();
+      }
+    });
+  }
+
+  reorderCardDom(readStoredIds(CARD_ORDER_KEY));
+  buildCardSettings();
+  applyCardVisibility();
   prepareCardDragHandles();
 
   function css(name, fallback) {
@@ -326,7 +413,7 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  async function rpc(op) {
+  async function rpc(op, context = {}) {
     const response = await fetch(ACTION_URL, {
       method: 'POST',
       credentials: 'same-origin',
@@ -335,7 +422,7 @@
         type: SESSION_TYPE,
         plugin_id: pluginId,
         action_id: 'statistics_rpc',
-        context: { op: op || 'snapshot' }
+        context: { ...context, op: op || 'snapshot' }
       })
     });
     let body = {};
@@ -403,50 +490,56 @@
     selectEl.value = currentScopeId;
   }
 
-  function renderKpis(summary) {
+  function kpiItems(summary) {
     const pubRange = summary.publication_year_min && summary.publication_year_max
       ? `${summary.publication_year_min}–${summary.publication_year_max}` : '–';
     let items = [
-      ['fa-book', '도서', formatNumber(summary.book_count)],
-      ['fa-user-pen', '저자', formatNumber(summary.author_count)],
-      ['fa-layer-group', '시리즈', formatNumber(summary.series_count)],
-      ['fa-building', '출판사', formatNumber(summary.publisher_count)],
-      ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-      ['fa-tags', '장르', formatNumber(summary.genre_count)],
-      ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-      ['fa-calendar-days', '출판 연도', pubRange],
-      ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+      ['items', 'fa-book', '도서', formatNumber(summary.book_count)],
+      ['authors', 'fa-user-pen', '저자', formatNumber(summary.author_count)],
+      ['series', 'fa-layer-group', '시리즈', formatNumber(summary.series_count)],
+      ['publishers', 'fa-building', '출판사', formatNumber(summary.publisher_count)],
+      ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+      ['genres', 'fa-tags', '장르', formatNumber(summary.genre_count)],
+      ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+      ['years', 'fa-calendar-days', '출판 연도', pubRange],
+      ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
     ];
     if (SESSION_TYPE === 'adult') {
-      items[0][1] = '성인 도서';
+      items[0][2] = '성인 도서';
     } else if (SESSION_TYPE === 'audiobook') {
       items = [
-        ['fa-headphones', '오디오북', formatNumber(summary.item_count)],
-        ['fa-user-pen', '저자', formatNumber(summary.author_count)],
-        ['fa-list-ol', '트랙', formatNumber(summary.child_count)],
-        ['fa-building', '출판사', formatNumber(summary.publisher_count)],
-        ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-        ['fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
-        ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-        ['fa-calendar-days', '출시 연도', pubRange],
-        ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+        ['items', 'fa-headphones', '오디오북', formatNumber(summary.item_count)],
+        ['authors', 'fa-user-pen', '저자', formatNumber(summary.author_count)],
+        ['children', 'fa-list-ol', '트랙', formatNumber(summary.child_count)],
+        ['publishers', 'fa-building', '출판사', formatNumber(summary.publisher_count)],
+        ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+        ['duration', 'fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
+        ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+        ['years', 'fa-calendar-days', '출시 연도', pubRange],
+        ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
       ];
     } else if (SESSION_TYPE === 'video') {
       items = [
-        ['fa-film', '비디오', formatNumber(summary.item_count)],
-        ['fa-list-ol', '에피소드', formatNumber(summary.child_count)],
-        ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-        ['fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
-        ['fa-tags', '장르', formatNumber(summary.genre_count)],
-        ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-        ['fa-calendar-days', '출시 연도', pubRange],
-        ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+        ['items', 'fa-film', '비디오', formatNumber(summary.item_count)],
+        ['children', 'fa-list-ol', '에피소드', formatNumber(summary.child_count)],
+        ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+        ['duration', 'fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
+        ['genres', 'fa-tags', '장르', formatNumber(summary.genre_count)],
+        ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+        ['years', 'fa-calendar-days', '출시 연도', pubRange],
+        ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
       ];
     }
+    return items;
+  }
+
+  function renderKpis(summary) {
     kpisEl.textContent = '';
-    items.forEach(([icon, label, value]) => {
+    kpiItems(summary).forEach(([id, icon, label, value]) => {
       const card = document.createElement('div');
       card.className = 'bo-stats__kpi';
+      card.dataset.card = 'kpi-' + id;
+      card.hidden = hiddenCards.has(card.dataset.card);
       const labelEl = document.createElement('div');
       labelEl.className = 'bo-stats__kpi-label';
       const iconEl = document.createElement('i');
@@ -474,7 +567,7 @@
   function emptyChart(key, message) {
     disposeChart(key);
     const el = root.querySelector(`[data-chart="${key}"]`);
-    if (!el) return;
+    if (!el || el.closest('[data-card]')?.hidden) return;
     el.textContent = '';
     const empty = document.createElement('div');
     empty.className = 'bo-stats__chart-empty';
@@ -484,8 +577,8 @@
 
   function makeChart(key, option) {
     const el = root.querySelector(`[data-chart="${key}"]`);
-    if (!el || !window.echarts) return;
     disposeChart(key);
+    if (!el || !window.echarts || el.closest('[data-card]')?.hidden) return;
     el.textContent = '';
     const chart = window.echarts.init(el, null, { renderer: 'svg' });
     chart.setOption(option, { notMerge: true });
@@ -515,6 +608,108 @@
       axisLabel: { color: t.muted, fontSize: 10 },
       splitLine: { lineStyle: { color: t.borderLight } }
     };
+  }
+
+  function renderReadingCalendar() {
+    if (!calendarCard || calendarCard.hidden || !calendarState) return;
+    if (!window.echarts) {
+      emptyChart('reading-calendar', 'ECharts를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+      return;
+    }
+    const t = theme();
+    const days = calendarState.days || [];
+    const activeDays = days.filter((day) => day[1] > 0).length;
+    calendarSummary.textContent = `${calendarState.year}년 · ${formatNumber(activeDays)}일 읽음`;
+    makeChart('reading-calendar', Object.assign(baseOption(), {
+      aria: { enabled: true, description: `${calendarState.year}년 내 독서 달력. ${activeDays}일의 독서 기록이 있습니다. 색상은 날짜별 읽은 도서 수입니다.` },
+      tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.value[0])}<br><b>${formatNumber(p.value[1])}권</b>` },
+      visualMap: {
+        type: 'piecewise', orient: 'horizontal', left: 'center', top: 25,
+        textStyle: { color: t.muted, fontSize: 10 }, itemWidth: 14, itemHeight: 12,
+        pieces: [
+          { value: 0, label: '기록 없음', color: t.borderLight },
+          { value: 1, label: '1권', color: '#ddd6fe' },
+          { min: 2, max: 3, label: '2–3권', color: '#c4b5fd' },
+          { min: 4, max: 6, label: '4–6권', color: '#a78bfa' },
+          { min: 7, label: '7권 이상', color: t.accent }
+        ]
+      },
+      calendar: {
+        top: 90, left: 40, right: 30, cellSize: ['auto', 13],
+        range: String(calendarState.year),
+        itemStyle: { color: t.card, borderWidth: 0.5, borderColor: t.border },
+        splitLine: { lineStyle: { color: t.border, width: 1 } },
+        yearLabel: { show: false },
+        monthLabel: { nameMap: Array.from({ length: 12 }, (_, i) => `${i + 1}월`), color: t.muted, fontSize: 10 },
+        dayLabel: { firstDay: 1, nameMap: ['일', '월', '화', '수', '목', '금', '토'], color: t.muted, fontSize: 10 }
+      },
+      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: days }]
+    }));
+  }
+
+  function renderReadingWeekdays() {
+    if (!weekdayCard || weekdayCard.hidden || !calendarState) return;
+    weekdaySummary.textContent = `${calendarState.year}년`;
+    const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+    const totals = Array(7).fill(0);
+    (calendarState.days || []).forEach(([date, count]) => {
+      const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+      totals[weekday] += Number(count) || 0;
+    });
+    if (!totals.some(value => value > 0)) {
+      emptyChart('reading-weekdays', '올해 독서 기록이 없습니다.');
+      return;
+    }
+    if (!window.echarts) {
+      emptyChart('reading-weekdays', 'ECharts를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+      return;
+    }
+    const t = theme();
+    const max = Math.max(...totals);
+    const summary = weekdays.map((day, i) => `${day}요일 ${formatNumber(totals[i])}권`).join(', ');
+    makeChart('reading-weekdays', Object.assign(baseOption(), {
+      aria: { enabled: true, description: `${calendarState.year}년 요일별 독서 패턴. 일별 읽은 권수 합계이며 같은 책을 여러 날 읽으면 각각 합산합니다. ${summary}.` },
+      tooltip: { ...baseOption().tooltip, formatter: p => '일별 읽은 권수 합계<br>' + weekdays.map((day, i) => `${day}요일 · <b>${formatNumber(p.value[i])}권</b>`).join('<br>') },
+      radar: {
+        indicator: weekdays.map(name => ({ name, max })),
+        center: ['50%', '53%'], radius: '64%', splitNumber: 4,
+        axisName: { color: t.muted, fontSize: 11 },
+        axisLine: { lineStyle: { color: t.border } },
+        splitLine: { lineStyle: { color: t.border } },
+        splitArea: { areaStyle: { color: ['transparent', 'rgba(148,163,184,.04)'] } }
+      },
+      series: [{
+        type: 'radar', symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
+        areaStyle: { color: t.accent, opacity: 0.2 },
+        data: [{ name: '일별 읽은 권수 합계', value: totals }]
+      }]
+    }));
+  }
+
+  function setReadingMessage(summary, message) {
+    [calendarSummary, weekdaySummary].forEach(el => { if (el) el.textContent = summary; });
+    ['reading-calendar', 'reading-weekdays'].forEach(key => emptyChart(key, message));
+  }
+
+  async function refreshReadingCalendar(clear = false) {
+    if (disposed || ![calendarCard, weekdayCard].some(card => card && !card.hidden)) return;
+    const requestId = ++calendarRequest;
+    if (clear) {
+      calendarState = null;
+      setReadingMessage('내 독서 기록', '독서 기록을 불러오는 중입니다.');
+    }
+    try {
+      const state = await rpc('reading_calendar', { library_id: currentScopeId });
+      if (disposed || requestId !== calendarRequest) return;
+      calendarState = state;
+      renderReadingCalendar();
+      renderReadingWeekdays();
+    } catch (error) {
+      if (disposed || requestId !== calendarRequest) return;
+      calendarState = null;
+      setReadingMessage('조회 실패', error.message || '독서 기록을 불러오지 못했습니다.');
+    }
   }
 
   function pieOption(rows, valueKey, valueFormatter) {
@@ -551,7 +746,8 @@
 
   function largestBooksOption(rows) {
     const t = theme();
-    const data = (rows || []).slice(0, 12).slice().reverse();
+    const data = (rows || []).slice().sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0)).slice(0, 50);
+    const needsScroll = data.length > 10;
     const maxBytes = data.reduce((max, row) => Math.max(max, Number(row.bytes || 0)), 0);
     const largestStorageScale = storageScale(maxBytes);
     const scale = largestStorageScale;
@@ -566,7 +762,7 @@
       return n.toFixed(scale.digits).replace(/\.0+$/, '');
     };
     return Object.assign(baseOption(), {
-      grid: { left: 12, right: 24, top: 12, bottom: 18, containLabel: true },
+      grid: { left: 12, right: needsScroll ? 38 : 24, top: 12, bottom: 18, containLabel: true },
       tooltip: {
         ...baseOption().tooltip,
         trigger: 'axis',
@@ -580,20 +776,80 @@
       xAxis: {
         type: 'value',
         ...axisStyle(),
-        axisLabel: { color: t.muted, fontSize: 9, formatter: (value) => `${numberLabel(value)} ${scale.unit}` },
+        axisLabel: { color: t.muted, fontSize: 9, hideOverlap: true, formatter: (value) => `${numberLabel(value)} ${scale.unit}` },
         splitLine: { lineStyle: { color: t.borderLight } }
       },
       yAxis: {
         type: 'category',
+        inverse: true,
         data: scaled.map((row) => row.name),
         ...axisStyle(),
         axisLabel: { color: t.muted, fontSize: 10, width: 132, overflow: 'truncate' }
       },
+      dataZoom: needsScroll ? [
+        { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: 9, zoomOnMouseWheel: false, moveOnMouseWheel: true, moveOnMouseMove: false },
+        {
+          type: 'slider', yAxisIndex: 0, orient: 'vertical', startValue: 0, endValue: 9,
+          right: 6, top: 12, bottom: 35, width: 10, zoomLock: true, minValueSpan: 9, maxValueSpan: 9,
+          showDetail: false, showDataShadow: false, brushSelect: false, handleSize: 0, moveHandleSize: 0,
+          borderColor: t.border, fillerColor: 'rgba(148,163,184,.3)', backgroundColor: 'rgba(148,163,184,.08)'
+        }
+      ] : [],
       series: [{
         type: 'bar',
         data: scaled.map((row) => ({ value: row.value, rawBytes: row.rawBytes })),
         barMaxWidth: 16,
         itemStyle: { borderRadius: [0, 4, 4, 0] }
+      }]
+    });
+  }
+
+  function treemapLabelLayout({ rect, dataIndex }) {
+    if (dataIndex == null) return {}; // 셀이 아닌 하단 경로 라벨은 유지한다.
+    return { fontSize: rect.width < 72 || rect.height < 36 ? 0 : 11, hideOverlap: true };
+  }
+
+  function largestTreemapOption(rows) {
+    const t = theme();
+    const bySize = treemapModeEl.value === 'size';
+    const sorted = rows.slice().sort((a, b) => Number(b.bytes) - Number(a.bytes));
+    const midpoint = (Number(sorted[0].bytes) + Number(sorted[sorted.length - 1].bytes)) / 2;
+    const items = sorted.map(row => ({
+      id: String(row.id), name: row.title || '제목 없음', value: Number(row.bytes),
+      ...(bySize ? { label: { color: Number(row.bytes) > midpoint ? '#fff' : '#172554' } } : {})
+    }));
+    const groups = new Map();
+    if (!bySize) sorted.forEach((row, index) => {
+      const format = String(row.format || '').trim().toLowerCase() || '기타';
+      if (!groups.has(format)) groups.set(format, { name: format, value: 0, children: [] });
+      const group = groups.get(format);
+      const bytes = Number(row.bytes);
+      group.value += bytes;
+      group.children.push(items[index]);
+    });
+    return Object.assign(baseOption(), {
+      tooltip: { ...baseOption().tooltip, formatter: p => {
+        const path = (p.treePathInfo || []).slice(1).map(node => node.name).join(' / ');
+        return `${escapeTooltip(path || p.name)}<br><b>${formatBytes(p.value)}</b>`;
+      } },
+      series: [{
+        name: '용량 상위 항목', type: 'treemap', roam: false, nodeClick: 'zoomToNode',
+        left: 12, right: 12, top: 12, bottom: 38,
+        sort: 'desc', visibleMin: 0,
+        label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate', formatter: p => `${p.name}\n${formatBytes(p.value)}` },
+        labelLayout: treemapLabelLayout,
+        upperLabel: { show: true, height: 24, color: t.text, overflow: 'truncate', formatter: p => `${p.name} · ${formatBytes(p.value)}` },
+        itemStyle: { borderColor: t.card },
+        levels: bySize ? [
+          { colorMappingBy: 'value', color: ['#bfdbfe', '#1e3a8a'], itemStyle: { borderWidth: 0, gapWidth: 2 } },
+          { itemStyle: { borderWidth: 1, gapWidth: 1 } }
+        ] : [
+          { itemStyle: { borderWidth: 0, gapWidth: 5 } },
+          { itemStyle: { borderWidth: 2, gapWidth: 2 } },
+          { colorSaturation: [.35, .6], itemStyle: { gapWidth: 1 } }
+        ],
+        breadcrumb: { show: true, bottom: 5, itemStyle: { color: t.card, borderColor: t.border, textStyle: { color: t.text } } },
+        data: bySize ? items : [...groups.values()]
       }]
     });
   }
@@ -632,17 +888,30 @@
       }));
     } else emptyChart('metadata-score');
 
-    const genres = scope.genre_distribution || [];
+    const tagsSelected = distributionModeEl.value === 'tags';
+    const genres = (tagsSelected ? scope.tag_distribution : scope.genre_distribution) || [];
+    root.querySelector('[data-card="genres"] h2').textContent = tagsSelected ? '태그 분포' : '장르 분포';
     if (genres.length) {
       makeChart('genres', Object.assign(baseOption(), {
         tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.name)}<br><b>${formatItemCount(p.value)}</b>` },
-        series: [{ type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, label: { show: true, color: '#fff', fontSize: 11 }, upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 }, data: genres.map((row) => ({ name: row.label, value: row.count })) }]
+        series: [{
+          name: tagsSelected ? '태그 분포' : '장르 분포', type: 'treemap',
+          left: 10, right: 10, top: 10, bottom: 38, roam: false, nodeClick: 'zoomToNode', visibleMin: 0,
+          breadcrumb: { show: true, bottom: 5, itemStyle: { color: t.card, borderColor: t.border, textStyle: { color: t.text } } },
+          label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate' }, labelLayout: treemapLabelLayout,
+          upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 },
+          data: genres.map((row) => ({ name: row.label, value: row.count }))
+        }]
       }));
-    } else emptyChart('genres');
+    } else emptyChart('genres', tagsSelected && !Object.hasOwn(scope, 'tag_distribution')
+      ? '태그 분포를 보려면 통계 갱신을 실행해 주세요.' : '표시할 데이터가 없습니다.');
 
     const largest = scope.largest_books || [];
     if (largest.length) makeChart('largest', largestBooksOption(largest));
     else emptyChart('largest');
+    const sized = largest.filter(row => Number.isFinite(Number(row.bytes)) && Number(row.bytes) > 0);
+    if (sized.length) makeChart('largest-treemap', largestTreemapOption(sized));
+    else emptyChart('largest-treemap');
 
     const heat = scope.library_metadata_completeness || {};
     if ((heat.libraries || []).length && (heat.fields || []).length) {
@@ -797,6 +1066,7 @@
         }))
       }));
     } else emptyChart('format-time');
+    renderReadingWeekdays();
     refreshCardLayout();
   }
 
@@ -835,6 +1105,7 @@
       setStatus('error', error.message || String(error));
     } finally {
       if (!disposed) {
+        refreshReadingCalendar();
         const fast = !latestState || !latestState.snapshot || latestState.status === 'refreshing' || latestState.refresh_scheduled;
         pollTimer = window.setTimeout(poll, fast ? 3500 : 30000);
       }
@@ -843,6 +1114,7 @@
 
   selectEl.addEventListener('change', () => {
     currentScopeId = selectEl.value || 'all';
+    refreshReadingCalendar(true);
     if (latestState && latestState.snapshot) {
       const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
       renderKpis(scope.summary || {});
@@ -850,7 +1122,21 @@
     }
   });
 
+  root.querySelectorAll('[data-chart-select]').forEach(select => {
+    const key = `bookoasis.statistics.${select.dataset.chartSelect}.v1.${SESSION_TYPE}`;
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
+    } catch (_) {}
+    select.addEventListener('change', () => {
+      try { window.localStorage.setItem(key, select.value); } catch (_) {}
+      const scope = latestState?.snapshot?.scopes[currentScopeId];
+      if (scope && window.echarts) renderCharts(scope);
+    });
+  });
+
   refreshEl.addEventListener('click', async () => {
+    refreshReadingCalendar();
     refreshEl.disabled = true;
     refreshEl.classList.add('is-spinning');
     setStatus('refreshing', '통계 재집계를 요청하고 있습니다...');
@@ -882,6 +1168,7 @@
   const themeObserver = new MutationObserver(() => {
     window.clearTimeout(themeTimer);
     themeTimer = window.setTimeout(() => {
+      renderReadingCalendar();
       if (latestState && latestState.snapshot && window.echarts) {
         const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
         renderCharts(scope);
@@ -926,6 +1213,7 @@
     }
     if (muuriResult.status === 'fulfilled') syncCardLayoutMode();
     else console.warn('[Statistics] Muuri layout unavailable; CSS grid fallback is active.', muuriResult.reason);
+    refreshReadingCalendar(true);
     window.clearTimeout(pollTimer);
     pollTimer = window.setTimeout(poll, (!latestState || !latestState.snapshot) ? 2500 : 30000);
   });
