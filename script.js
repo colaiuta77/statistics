@@ -700,7 +700,8 @@
 
   function largestBooksOption(rows) {
     const t = theme();
-    const data = (rows || []).slice(0, 12).slice().reverse();
+    const data = (rows || []).slice().sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0)).slice(0, 50);
+    const needsScroll = data.length > 10;
     const maxBytes = data.reduce((max, row) => Math.max(max, Number(row.bytes || 0)), 0);
     const largestStorageScale = storageScale(maxBytes);
     const scale = largestStorageScale;
@@ -715,7 +716,7 @@
       return n.toFixed(scale.digits).replace(/\.0+$/, '');
     };
     return Object.assign(baseOption(), {
-      grid: { left: 12, right: 24, top: 12, bottom: 18, containLabel: true },
+      grid: { left: 12, right: needsScroll ? 38 : 24, top: 12, bottom: 18, containLabel: true },
       tooltip: {
         ...baseOption().tooltip,
         trigger: 'axis',
@@ -729,15 +730,25 @@
       xAxis: {
         type: 'value',
         ...axisStyle(),
-        axisLabel: { color: t.muted, fontSize: 9, formatter: (value) => `${numberLabel(value)} ${scale.unit}` },
+        axisLabel: { color: t.muted, fontSize: 9, hideOverlap: true, formatter: (value) => `${numberLabel(value)} ${scale.unit}` },
         splitLine: { lineStyle: { color: t.borderLight } }
       },
       yAxis: {
         type: 'category',
+        inverse: true,
         data: scaled.map((row) => row.name),
         ...axisStyle(),
         axisLabel: { color: t.muted, fontSize: 10, width: 132, overflow: 'truncate' }
       },
+      dataZoom: needsScroll ? [
+        { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: 9, zoomOnMouseWheel: false, moveOnMouseWheel: true, moveOnMouseMove: false },
+        {
+          type: 'slider', yAxisIndex: 0, orient: 'vertical', startValue: 0, endValue: 9,
+          right: 6, top: 12, bottom: 35, width: 10, zoomLock: true, minValueSpan: 9, maxValueSpan: 9,
+          showDetail: false, showDataShadow: false, brushSelect: false, handleSize: 0, moveHandleSize: 0,
+          borderColor: t.border, fillerColor: 'rgba(148,163,184,.3)', backgroundColor: 'rgba(148,163,184,.08)'
+        }
+      ] : [],
       series: [{
         type: 'bar',
         data: scaled.map((row) => ({ value: row.value, rawBytes: row.rawBytes })),
@@ -837,7 +848,14 @@
     if (genres.length) {
       makeChart('genres', Object.assign(baseOption(), {
         tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.name)}<br><b>${formatItemCount(p.value)}</b>` },
-        series: [{ type: 'treemap', left: 10, right: 10, top: 10, bottom: 10, roam: false, nodeClick: false, visibleMin: 0, breadcrumb: { show: false }, label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate' }, labelLayout: treemapLabelLayout, upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 }, data: genres.map((row) => ({ name: row.label, value: row.count })) }]
+        series: [{
+          name: tagsSelected ? '태그 분포' : '장르 분포', type: 'treemap',
+          left: 10, right: 10, top: 10, bottom: 38, roam: false, nodeClick: 'zoomToNode', visibleMin: 0,
+          breadcrumb: { show: true, bottom: 5, itemStyle: { color: t.card, borderColor: t.border, textStyle: { color: t.text } } },
+          label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate' }, labelLayout: treemapLabelLayout,
+          upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 },
+          data: genres.map((row) => ({ name: row.label, value: row.count }))
+        }]
       }));
     } else emptyChart('genres', tagsSelected && !Object.hasOwn(scope, 'tag_distribution')
       ? '태그 분포를 보려면 통계 갱신을 실행해 주세요.' : '표시할 데이터가 없습니다.');
