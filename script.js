@@ -52,6 +52,12 @@
   const refreshEl = root.querySelector('[data-role="refresh"]');
   const layoutResetEl = root.querySelector('[data-role="layout-reset"]');
   const cardSettingsEl = root.querySelector('[data-role="card-settings"]');
+  const treemapModeEl = root.querySelector('[data-role="treemap-mode"]');
+  const distributionModeEl = root.querySelector('[data-role="distribution-mode"]');
+  if (!['general', 'adult'].includes(SESSION_TYPE)) {
+    distributionModeEl.querySelector('[value="tags"]').remove();
+    distributionModeEl.hidden = true;
+  }
   const statusEl = root.querySelector('[data-role="status"]');
   const statusTextEl = root.querySelector('[data-role="status-text"]');
   const kpisEl = root.querySelector('[data-role="kpis"]');
@@ -741,16 +747,28 @@
     });
   }
 
+  function treemapLabelLayout({ rect, dataIndex }) {
+    if (dataIndex == null) return {}; // 셀이 아닌 하단 경로 라벨은 유지한다.
+    return { fontSize: rect.width < 72 || rect.height < 36 ? 0 : 11, hideOverlap: true };
+  }
+
   function largestTreemapOption(rows) {
     const t = theme();
+    const bySize = treemapModeEl.value === 'size';
+    const sorted = rows.slice().sort((a, b) => Number(b.bytes) - Number(a.bytes));
+    const midpoint = (Number(sorted[0].bytes) + Number(sorted[sorted.length - 1].bytes)) / 2;
+    const items = sorted.map(row => ({
+      id: String(row.id), name: row.title || '제목 없음', value: Number(row.bytes),
+      ...(bySize ? { label: { color: Number(row.bytes) > midpoint ? '#fff' : '#172554' } } : {})
+    }));
     const groups = new Map();
-    rows.forEach(row => {
+    if (!bySize) sorted.forEach((row, index) => {
       const format = String(row.format || '').trim().toLowerCase() || '기타';
       if (!groups.has(format)) groups.set(format, { name: format, value: 0, children: [] });
       const group = groups.get(format);
       const bytes = Number(row.bytes);
       group.value += bytes;
-      group.children.push({ id: String(row.id), name: row.title || '제목 없음', value: bytes });
+      group.children.push(items[index]);
     });
     return Object.assign(baseOption(), {
       tooltip: { ...baseOption().tooltip, formatter: p => {
@@ -760,16 +778,21 @@
       series: [{
         name: '용량 상위 항목', type: 'treemap', roam: false, nodeClick: 'zoomToNode',
         left: 12, right: 12, top: 12, bottom: 38,
-        label: { show: true, color: '#fff', fontSize: 11, formatter: p => `${p.name}\n${formatBytes(p.value)}` },
-        upperLabel: { show: true, height: 24, color: '#fff' },
+        sort: 'desc', visibleMin: 0,
+        label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate', formatter: p => `${p.name}\n${formatBytes(p.value)}` },
+        labelLayout: treemapLabelLayout,
+        upperLabel: { show: true, height: 24, color: t.text, overflow: 'truncate', formatter: p => `${p.name} · ${formatBytes(p.value)}` },
         itemStyle: { borderColor: t.card },
-        levels: [
+        levels: bySize ? [
+          { colorMappingBy: 'value', color: ['#bfdbfe', '#1e3a8a'], itemStyle: { borderWidth: 0, gapWidth: 2 } },
+          { itemStyle: { borderWidth: 1, gapWidth: 1 } }
+        ] : [
           { itemStyle: { borderWidth: 0, gapWidth: 5 } },
           { itemStyle: { borderWidth: 2, gapWidth: 2 } },
           { colorSaturation: [.35, .6], itemStyle: { gapWidth: 1 } }
         ],
         breadcrumb: { show: true, bottom: 5, itemStyle: { color: t.card, borderColor: t.border, textStyle: { color: t.text } } },
-        data: [...groups.values()]
+        data: bySize ? items : [...groups.values()]
       }]
     });
   }
@@ -808,13 +831,16 @@
       }));
     } else emptyChart('metadata-score');
 
-    const genres = scope.genre_distribution || [];
+    const tagsSelected = distributionModeEl.value === 'tags';
+    const genres = (tagsSelected ? scope.tag_distribution : scope.genre_distribution) || [];
+    root.querySelector('[data-card="genres"] h2').textContent = tagsSelected ? '태그 분포' : '장르 분포';
     if (genres.length) {
       makeChart('genres', Object.assign(baseOption(), {
         tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.name)}<br><b>${formatItemCount(p.value)}</b>` },
-        series: [{ type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, label: { show: true, color: '#fff', fontSize: 11 }, upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 }, data: genres.map((row) => ({ name: row.label, value: row.count })) }]
+        series: [{ type: 'treemap', left: 10, right: 10, top: 10, bottom: 10, roam: false, nodeClick: false, visibleMin: 0, breadcrumb: { show: false }, label: { show: true, color: '#fff', fontSize: 11, overflow: 'truncate' }, labelLayout: treemapLabelLayout, upperLabel: { show: false }, itemStyle: { borderColor: t.card, borderWidth: 2, gapWidth: 2 }, data: genres.map((row) => ({ name: row.label, value: row.count })) }]
       }));
-    } else emptyChart('genres');
+    } else emptyChart('genres', tagsSelected && !Object.hasOwn(scope, 'tag_distribution')
+      ? '태그 분포를 보려면 통계 갱신을 실행해 주세요.' : '표시할 데이터가 없습니다.');
 
     const largest = scope.largest_books || [];
     if (largest.length) makeChart('largest', largestBooksOption(largest));
@@ -1029,6 +1055,19 @@
       renderKpis(scope.summary || {});
       if (window.echarts) renderCharts(scope);
     }
+  });
+
+  root.querySelectorAll('[data-chart-select]').forEach(select => {
+    const key = `bookoasis.statistics.${select.dataset.chartSelect}.v1.${SESSION_TYPE}`;
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (Array.from(select.options).some(option => option.value === saved)) select.value = saved;
+    } catch (_) {}
+    select.addEventListener('change', () => {
+      try { window.localStorage.setItem(key, select.value); } catch (_) {}
+      const scope = latestState?.snapshot?.scopes[currentScopeId];
+      if (scope && window.echarts) renderCharts(scope);
+    });
   });
 
   refreshEl.addEventListener('click', async () => {

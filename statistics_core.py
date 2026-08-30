@@ -14,6 +14,9 @@ from datetime import datetime
 from itertools import combinations
 from pathlib import Path
 
+LARGEST_ITEMS_LIMIT = 100
+TOKEN_DISTRIBUTION_LIMIT = 60
+
 
 def normalize_token(value):
     return " ".join(str(value or "").strip().split())
@@ -59,8 +62,9 @@ def build_genre_statistics(rows, top_limit=20, chord_limit=12):
             labels.setdefault(key, label)
             token_counts[key] += weight
             keyed.append(key)
-        for left, right in combinations(sorted(set(keyed)), 2):
-            pair_counts[(left, right)] += weight
+        if chord_limit:
+            for left, right in combinations(sorted(set(keyed)), 2):
+                pair_counts[(left, right)] += weight
 
     distribution = _sorted_counter(token_counts, labels, top_limit)
     chord_keys = [row["label"].casefold() for row in _sorted_counter(token_counts, labels, chord_limit)]
@@ -565,6 +569,15 @@ class StatisticsAggregator:
             GROUP BY library_id, genre
             """,
         )
+        tags = self._fetch_all(
+            "tags",
+            f"""
+            SELECT library_id, tags AS genre, COUNT(*) AS count
+            FROM books
+            WHERE {where} AND TRIM(COALESCE(tags, '')) <> ''
+            GROUP BY library_id, tags
+            """,
+        )
 
         metadata_fields_sql = {
             "author": "TRIM(COALESCE(author, '')) <> ''",
@@ -671,7 +684,7 @@ class StatisticsAggregator:
             FROM books
             WHERE {where} AND COALESCE(file_size, 0) > 0
             ORDER BY file_size DESC, id DESC
-            LIMIT 20
+            LIMIT {LARGEST_ITEMS_LIMIT}
             """,
         )
         largest_by_library = self._fetch_all(
@@ -684,7 +697,7 @@ class StatisticsAggregator:
                 FROM books
                 WHERE {where} AND COALESCE(file_size, 0) > 0
             ) ranked
-            WHERE rn <= 15
+            WHERE rn <= {LARGEST_ITEMS_LIMIT}
             ORDER BY library_id, rn
             """,
         )
@@ -693,6 +706,7 @@ class StatisticsAggregator:
             "summary": _group_by_library(summary_by_library),
             "formats": _group_by_library(formats),
             "genres": _group_by_library(genres),
+            "tags": _group_by_library(tags),
             "metadata": _group_by_library(metadata),
             "scores": _group_by_library(scores),
             "created_month": _group_by_library(created_month),
@@ -716,6 +730,7 @@ class StatisticsAggregator:
                 summary_source = summary_all
                 format_rows = all_rows.get("formats", [])
                 genre_rows = all_rows.get("genres", [])
+                tag_rows = all_rows.get("tags", [])
                 metadata_rows = all_rows.get("metadata", [])
                 score_rows = all_rows.get("scores", [])
                 created_rows = all_rows.get("created_month", [])
@@ -731,6 +746,7 @@ class StatisticsAggregator:
                 summary_source = (grouped["summary"].get(scope_id) or [{}])[0]
                 format_rows = grouped["formats"].get(scope_id, [])
                 genre_rows = grouped["genres"].get(scope_id, [])
+                tag_rows = grouped["tags"].get(scope_id, [])
                 metadata_rows = grouped["metadata"].get(scope_id, [])
                 score_rows = grouped["scores"].get(scope_id, [])
                 created_rows = grouped["created_month"].get(scope_id, [])
@@ -743,7 +759,8 @@ class StatisticsAggregator:
                 top_publishers = top_publishers_by_lib.get(scope_id, [])
                 selected_libraries = [row for row in libraries if str(row["id"]) == scope_id]
 
-            genre_stats = build_genre_statistics(genre_rows, top_limit=25, chord_limit=12)
+            genre_stats = build_genre_statistics(genre_rows, top_limit=TOKEN_DISTRIBUTION_LIMIT, chord_limit=12)
+            tag_stats = build_genre_statistics(tag_rows, top_limit=TOKEN_DISTRIBUTION_LIMIT, chord_limit=0)
             release_stats = _release_statistics(release_rows)
             books_added = _combine_period_rows(created_rows)[-60:]
             format_over_time = _combine_format_period_rows(format_month_rows)
@@ -774,6 +791,7 @@ class StatisticsAggregator:
                 "format_distribution": _combine_label_rows(format_rows, "count")[:15],
                 "storage_by_format": _combine_label_rows(format_rows, "bytes", output_value_key="bytes")[:15],
                 "genre_distribution": genre_stats["distribution"],
+                "tag_distribution": tag_stats["distribution"],
                 "genre_cooccurrence": genre_stats["chord"],
                 "top_authors": [{"label": str(row.get("label") or ""), "count": _int(row.get("count"))} for row in top_authors],
                 "top_series": [{"label": str(row.get("label") or ""), "count": _int(row.get("count"))} for row in top_series],
@@ -1037,7 +1055,7 @@ class MediaStatisticsAggregator:
 
             genre_stats = build_genre_statistics(
                 [{"genre": item.get("genre"), "count": 1} for item in selected_items],
-                top_limit=25,
+                top_limit=TOKEN_DISTRIBUTION_LIMIT,
                 chord_limit=12,
             )
             release_stats = _release_statistics(
@@ -1070,7 +1088,7 @@ class MediaStatisticsAggregator:
                 "publication_year_max": release_stats["max_year"],
                 "added_this_year": sum(count for period, count in added_counter.items() if period.startswith(current_year)),
             }
-            largest = sorted(selected_items, key=lambda item: (-bytes_by_item.get(_int(item.get("id")), 0), -_int(item.get("id"))))[:20]
+            largest = sorted(selected_items, key=lambda item: (-bytes_by_item.get(_int(item.get("id")), 0), -_int(item.get("id"))))[:LARGEST_ITEMS_LIMIT]
             return {
                 "summary": summary,
                 "format_distribution": _combine_label_rows(selected_files, "count")[:15],
