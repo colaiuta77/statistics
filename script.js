@@ -20,7 +20,7 @@
     general: { hidden: [], titles: {} },
     adult: { hidden: [], titles: {} },
     audiobook: {
-      hidden: ['genres', 'genre-chord', 'top-series'],
+      hidden: ['genres', 'genre-chord', 'top-series', 'reading-weekdays'],
       titles: {
         format: '트랙 포맷 분포',
         largest: '용량이 큰 오디오북',
@@ -34,7 +34,7 @@
       }
     },
     video: {
-      hidden: ['top-authors', 'top-series', 'top-publishers'],
+      hidden: ['top-authors', 'top-series', 'top-publishers', 'reading-weekdays'],
       titles: {
         format: '에피소드 포맷 분포',
         largest: '용량이 큰 비디오',
@@ -65,6 +65,8 @@
   const emptyEl = root.querySelector('[data-role="empty"]');
   const calendarCard = root.querySelector('[data-card="reading-calendar"]');
   const calendarSummary = root.querySelector('[data-role="calendar-summary"]');
+  const weekdayCard = root.querySelector('[data-card="reading-weekdays"]');
+  const weekdaySummary = root.querySelector('[data-role="weekday-summary"]');
   if (calendarCard) calendarCard.hidden = !['general', 'adult'].includes(SESSION_TYPE);
   const charts = new Map();
   const layoutMedia = window.matchMedia('(min-width: 721px)');
@@ -329,7 +331,7 @@
         const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
         renderCharts(scope);
       }
-      if (id === 'reading-calendar') {
+      if (id === 'reading-calendar' || id === 'reading-weekdays') {
         calendarRequest++;
         calendarState = null;
         refreshReadingCalendar(true);
@@ -645,24 +647,68 @@
     }));
   }
 
+  function renderReadingWeekdays() {
+    if (!weekdayCard || weekdayCard.hidden || !calendarState) return;
+    weekdaySummary.textContent = `${calendarState.year}년`;
+    const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+    const totals = Array(7).fill(0);
+    (calendarState.days || []).forEach(([date, count]) => {
+      const weekday = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+      totals[weekday] += Number(count) || 0;
+    });
+    if (!totals.some(value => value > 0)) {
+      emptyChart('reading-weekdays', '올해 독서 기록이 없습니다.');
+      return;
+    }
+    if (!window.echarts) {
+      emptyChart('reading-weekdays', 'ECharts를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+      return;
+    }
+    const t = theme();
+    const max = Math.max(...totals);
+    const summary = weekdays.map((day, i) => `${day}요일 ${formatNumber(totals[i])}권`).join(', ');
+    makeChart('reading-weekdays', Object.assign(baseOption(), {
+      aria: { enabled: true, description: `${calendarState.year}년 요일별 독서 패턴. 일별 읽은 권수 합계이며 같은 책을 여러 날 읽으면 각각 합산합니다. ${summary}.` },
+      tooltip: { ...baseOption().tooltip, formatter: p => '일별 읽은 권수 합계<br>' + weekdays.map((day, i) => `${day}요일 · <b>${formatNumber(p.value[i])}권</b>`).join('<br>') },
+      radar: {
+        indicator: weekdays.map(name => ({ name, max })),
+        center: ['50%', '53%'], radius: '64%', splitNumber: 4,
+        axisName: { color: t.muted, fontSize: 11 },
+        axisLine: { lineStyle: { color: t.border } },
+        splitLine: { lineStyle: { color: t.border } },
+        splitArea: { areaStyle: { color: ['transparent', 'rgba(148,163,184,.04)'] } }
+      },
+      series: [{
+        type: 'radar', symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
+        areaStyle: { color: t.accent, opacity: 0.2 },
+        data: [{ name: '일별 읽은 권수 합계', value: totals }]
+      }]
+    }));
+  }
+
+  function setReadingMessage(summary, message) {
+    [calendarSummary, weekdaySummary].forEach(el => { if (el) el.textContent = summary; });
+    ['reading-calendar', 'reading-weekdays'].forEach(key => emptyChart(key, message));
+  }
+
   async function refreshReadingCalendar(clear = false) {
-    if (!calendarCard || calendarCard.hidden || disposed) return;
+    if (disposed || ![calendarCard, weekdayCard].some(card => card && !card.hidden)) return;
     const requestId = ++calendarRequest;
     if (clear) {
       calendarState = null;
-      calendarSummary.textContent = '내 독서 기록';
-      emptyChart('reading-calendar', '독서 기록을 불러오는 중입니다.');
+      setReadingMessage('내 독서 기록', '독서 기록을 불러오는 중입니다.');
     }
     try {
       const state = await rpc('reading_calendar', { library_id: currentScopeId });
       if (disposed || requestId !== calendarRequest) return;
       calendarState = state;
       renderReadingCalendar();
+      renderReadingWeekdays();
     } catch (error) {
       if (disposed || requestId !== calendarRequest) return;
       calendarState = null;
-      calendarSummary.textContent = '조회 실패';
-      emptyChart('reading-calendar', error.message || '독서 기록을 불러오지 못했습니다.');
+      setReadingMessage('조회 실패', error.message || '독서 기록을 불러오지 못했습니다.');
     }
   }
 
@@ -1020,6 +1066,7 @@
         }))
       }));
     } else emptyChart('format-time');
+    renderReadingWeekdays();
     refreshCardLayout();
   }
 
