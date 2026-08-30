@@ -53,6 +53,9 @@
   const kpisEl = root.querySelector('[data-role="kpis"]');
   const chartsEl = root.querySelector('[data-role="charts"]');
   const emptyEl = root.querySelector('[data-role="empty"]');
+  const calendarCard = root.querySelector('[data-card="reading-calendar"]');
+  const calendarSummary = root.querySelector('[data-role="calendar-summary"]');
+  if (calendarCard) calendarCard.hidden = !['general', 'adult'].includes(SESSION_TYPE);
   const charts = new Map();
   const layoutMedia = window.matchMedia('(min-width: 721px)');
   applySessionUi();
@@ -64,6 +67,8 @@
   let currentScopeId = 'all';
   let pollTimer = null;
   let disposed = false;
+  let calendarState = null;
+  let calendarRequest = 0;
 
   function applySessionUi() {
     const settings = SESSION_UI[SESSION_TYPE] || SESSION_UI.general;
@@ -326,7 +331,7 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  async function rpc(op) {
+  async function rpc(op, context = {}) {
     const response = await fetch(ACTION_URL, {
       method: 'POST',
       credentials: 'same-origin',
@@ -335,7 +340,7 @@
         type: SESSION_TYPE,
         plugin_id: pluginId,
         action_id: 'statistics_rpc',
-        context: { op: op || 'snapshot' }
+        context: { ...context, op: op || 'snapshot' }
       })
     });
     let body = {};
@@ -515,6 +520,64 @@
       axisLabel: { color: t.muted, fontSize: 10 },
       splitLine: { lineStyle: { color: t.borderLight } }
     };
+  }
+
+  function renderReadingCalendar() {
+    if (!calendarCard || calendarCard.hidden || !calendarState) return;
+    if (!window.echarts) {
+      emptyChart('reading-calendar', 'ECharts를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+      return;
+    }
+    const t = theme();
+    const days = calendarState.days || [];
+    const activeDays = days.filter((day) => day[1] > 0).length;
+    calendarSummary.textContent = `${calendarState.year}년 · ${formatNumber(activeDays)}일 읽음`;
+    makeChart('reading-calendar', Object.assign(baseOption(), {
+      aria: { enabled: true, description: `${calendarState.year}년 내 독서 달력. ${activeDays}일의 독서 기록이 있습니다. 색상은 날짜별 읽은 도서 수입니다.` },
+      tooltip: { ...baseOption().tooltip, formatter: (p) => `${escapeTooltip(p.value[0])}<br><b>${formatNumber(p.value[1])}권</b>` },
+      visualMap: {
+        type: 'piecewise', orient: 'horizontal', left: 'center', top: 25,
+        textStyle: { color: t.muted, fontSize: 10 }, itemWidth: 14, itemHeight: 12,
+        pieces: [
+          { value: 0, label: '기록 없음', color: t.borderLight },
+          { value: 1, label: '1권', color: '#ddd6fe' },
+          { min: 2, max: 3, label: '2–3권', color: '#c4b5fd' },
+          { min: 4, max: 6, label: '4–6권', color: '#a78bfa' },
+          { min: 7, label: '7권 이상', color: t.accent }
+        ]
+      },
+      calendar: {
+        top: 90, left: 40, right: 30, cellSize: ['auto', 13],
+        range: String(calendarState.year),
+        itemStyle: { color: t.card, borderWidth: 0.5, borderColor: t.border },
+        splitLine: { lineStyle: { color: t.border, width: 1 } },
+        yearLabel: { show: false },
+        monthLabel: { nameMap: Array.from({ length: 12 }, (_, i) => `${i + 1}월`), color: t.muted, fontSize: 10 },
+        dayLabel: { firstDay: 1, nameMap: ['일', '월', '화', '수', '목', '금', '토'], color: t.muted, fontSize: 10 }
+      },
+      series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: days }]
+    }));
+  }
+
+  async function refreshReadingCalendar(clear = false) {
+    if (!calendarCard || calendarCard.hidden || disposed) return;
+    const requestId = ++calendarRequest;
+    if (clear) {
+      calendarState = null;
+      calendarSummary.textContent = '내 독서 기록';
+      emptyChart('reading-calendar', '독서 기록을 불러오는 중입니다.');
+    }
+    try {
+      const state = await rpc('reading_calendar', { library_id: currentScopeId });
+      if (disposed || requestId !== calendarRequest) return;
+      calendarState = state;
+      renderReadingCalendar();
+    } catch (error) {
+      if (disposed || requestId !== calendarRequest) return;
+      calendarState = null;
+      calendarSummary.textContent = '조회 실패';
+      emptyChart('reading-calendar', error.message || '독서 기록을 불러오지 못했습니다.');
+    }
   }
 
   function pieOption(rows, valueKey, valueFormatter) {
@@ -835,6 +898,7 @@
       setStatus('error', error.message || String(error));
     } finally {
       if (!disposed) {
+        refreshReadingCalendar();
         const fast = !latestState || !latestState.snapshot || latestState.status === 'refreshing' || latestState.refresh_scheduled;
         pollTimer = window.setTimeout(poll, fast ? 3500 : 30000);
       }
@@ -843,6 +907,7 @@
 
   selectEl.addEventListener('change', () => {
     currentScopeId = selectEl.value || 'all';
+    refreshReadingCalendar(true);
     if (latestState && latestState.snapshot) {
       const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
       renderKpis(scope.summary || {});
@@ -851,6 +916,7 @@
   });
 
   refreshEl.addEventListener('click', async () => {
+    refreshReadingCalendar();
     refreshEl.disabled = true;
     refreshEl.classList.add('is-spinning');
     setStatus('refreshing', '통계 재집계를 요청하고 있습니다...');
@@ -882,6 +948,7 @@
   const themeObserver = new MutationObserver(() => {
     window.clearTimeout(themeTimer);
     themeTimer = window.setTimeout(() => {
+      renderReadingCalendar();
       if (latestState && latestState.snapshot && window.echarts) {
         const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
         renderCharts(scope);
@@ -926,6 +993,7 @@
     }
     if (muuriResult.status === 'fulfilled') syncCardLayoutMode();
     else console.warn('[Statistics] Muuri layout unavailable; CSS grid fallback is active.', muuriResult.reason);
+    refreshReadingCalendar(true);
     window.clearTimeout(pollTimer);
     pollTimer = window.setTimeout(poll, (!latestState || !latestState.snapshot) ? 2500 : 30000);
   });

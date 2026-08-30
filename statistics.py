@@ -3,13 +3,14 @@
 
 import logging
 import os
+from datetime import date, timedelta
 
 from plugins.metadata.base import BaseMetadataProvider
 
 from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
-PLUGIN_VERSION = "1.1.2"
+PLUGIN_VERSION = "1.2.0"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
@@ -119,15 +120,67 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
             return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
         return {"success": True, **runtime.get_state()}
 
+    def _reading_calendar(self, db_type, context):
+        from flask import has_request_context, session
+
+        # 코어 권한 검사와 동일한 세션 이름만 허용한다.
+        if db_type not in ("general", "adult"):
+            return {"success": False, "error": "독서 달력은 일반·성인 도서에서만 지원합니다."}
+        user_id = session.get("user_id") if has_request_context() else None
+        if not user_id:
+            return {"success": False, "error": "로그인이 필요합니다."}
+
+        library_id = context.get("library_id", "all")
+        if library_id != "all":
+            try:
+                if type(library_id) not in (str, int) or not str(library_id).isdigit():
+                    raise ValueError
+                library_id = int(library_id)
+                if not 0 < library_id < 2 ** 63:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return {"success": False, "error": "올바르지 않은 보관함입니다."}
+
+        today = date.today()
+        start = date(today.year, 1, 1)
+        end = date(today.year + 1, 1, 1)
+        query = """
+            SELECT l.read_date, COUNT(DISTINCT l.book_id) AS book_count
+            FROM user_reading_log l
+            JOIN books b ON b.id = l.book_id
+            WHERE l.user_id = ? AND l.read_date >= ? AND l.read_date <= ?
+              AND l.pages_read_delta > 0 AND COALESCE(b.is_deleted, 0) = 0
+              AND EXISTS (
+                SELECT 1 FROM user_category_permissions p
+                WHERE p.user_id = l.user_id AND p.library_id = b.library_id AND p.has_access = 1
+              )
+        """
+        params = [user_id, start.isoformat(), today.isoformat()]
+        if library_id != "all":
+            query += " AND b.library_id = ?"
+            params.append(library_id)
+        query += " GROUP BY l.read_date ORDER BY l.read_date"
+        rows = self.get_db_gateway(db_type).fetch_all(query, tuple(params))
+        counts = {str(row["read_date"]): int(row["book_count"]) for row in rows}
+        days = []
+        for offset in range((end - start).days):
+            day = (start + timedelta(days=offset)).isoformat()
+            days.append([day, counts.get(day, 0)])
+        return {"success": True, "year": today.year, "days": days}
+
     def run_context_menu_action(self, db_type, action_id, context):
         if action_id != "statistics_rpc":
             return {"success": False, "error": "지원하지 않는 통계 요청입니다."}
+        context = context or {}
+        if not isinstance(context, dict):
+            return {"success": False, "error": "올바르지 않은 통계 요청입니다."}
+        op = str(context.get("op") or "snapshot").strip().lower()
+        if op == "reading_calendar":
+            return self._reading_calendar(db_type, context)
         runtime = self._get_or_start_runtime(db_type)
         if runtime is None:
             return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
 
-        context = context or {}
-        op = str(context.get("op") or "snapshot").strip().lower()
         if op in {"snapshot", "status"}:
             return {"success": True, **runtime.get_state()}
         if op == "refresh":

@@ -194,6 +194,24 @@
 .bo-stats__card--full { grid-column: 1 / -1; }
 .bo-stats__card--double { height: var(--stats-card-double); min-height: var(--stats-card-double); }
 
+.bo-stats__card--calendar {
+  height: 300px;
+  min-height: 300px;
+  margin-top: var(--stats-card-gap);
+}
+.bo-stats__calendar-scroll {
+  height: calc(100% - var(--stats-card-header-height));
+  overflow-x: auto;
+}
+.bo-stats__calendar-scroll:focus-visible {
+  outline: 2px solid var(--stats-accent);
+  outline-offset: -2px;
+}
+.bo-stats__calendar-scroll .bo-stats__chart {
+  min-width: 760px;
+  height: 100%;
+}
+
 /* Muuri 활성화 시 각 카드의 높이를 독립적으로 계산해 masonry 형태로 배치한다. */
 .bo-stats__charts--muuri {
   display: block;
