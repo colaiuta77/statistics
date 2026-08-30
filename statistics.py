@@ -9,7 +9,7 @@ from plugins.metadata.base import BaseMetadataProvider
 from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
-PLUGIN_VERSION = "1.1.1"
+PLUGIN_VERSION = "1.1.2"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
@@ -53,7 +53,23 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
         "order": 82,
         "sessions": "all",
     }
-    update_manifest = None
+    update_manifest = {
+        "enabled": True,
+        "provider": "github-raw",
+        "raw_base_url": "https://raw.githubusercontent.com/colaiuta77/statistics/main",
+        "files": [
+            "statistics.py",
+            "statistics_core.py",
+            "__init__.py",
+            "index.html",
+            "style.css",
+            "script.js",
+            "VERSION",
+        ],
+        "version_file": "VERSION",
+        "version_key": "plugin version",
+        "show_sample_update_button": True,
+    }
 
     def search(self, db_type, query):
         return []
