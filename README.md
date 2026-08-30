@@ -2,23 +2,24 @@
 
 BookOasis 일반·성인 도서, 오디오북과 비디오 라이브러리를 백그라운드에서 미리 집계하고, 저장된 스냅샷을 ECharts 기반 대시보드로 빠르게 보여주는 독립 카테고리 플러그인입니다.
 
-![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.1.1)
+![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.1.2)
 
-![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.1.1)
+![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.1.2)
 
 ## 버전 및 호환 정보
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.1.1` |
+| 플러그인 버전 | `1.1.2` |
 | 플러그인 ID | `statistics` |
 | 클래스 | `StatisticsMetadataProvider` |
 | 모듈 | `plugins.metadata.statistics.statistics` |
 | 유형 | 백그라운드 사전 집계형 라이브러리 통계 카테고리 UI 제공자 |
 | 확인한 BookOasis 버전 | `2.4.7` |
+| 확인한 업데이트 계약 | BookOasis `2.4.8` (`eb1d0be`) |
 | 지원 DB | SQLite, MariaDB |
 | 현재 지원 세션 | `general`, `adult`, `audiobook`, `video` |
-| 문서 작성일 | `2026-08-29` |
+| 문서 작성일 | `2026-08-30` |
 
 이 플러그인은 BookOasis의 폴더형 플러그인 구조, `PluginDatabaseGateway`, `category_tab`, `start_background_service()`와 스캔 완료 훅을 사용합니다. BookOasis 공통 UI나 코어 파일을 수정하지 않습니다.
 
@@ -140,15 +141,23 @@ git clone https://github.com/colaiuta77/statistics.git statistics
 4. 좌측 사이드바의 `통계` 카테고리를 엽니다.
 5. 최초 백그라운드 집계가 완료되면 저장된 통계가 표시됩니다.
 
-업데이트할 때는 BookOasis의 `plugins/metadata/`에서 다음 명령을 실행합니다.
+Docker 환경에서는 BookOasis `plugins` 디렉터리가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다.
+
+### 업데이트
+
+`1.1.2`부터 BookOasis 공식 `update_manifest` 계약을 지원합니다. `환경설정 > 플러그인 설정`에서 `통계` 카드를 펼쳐 업데이트 버튼을 사용할 수 있습니다. 버튼 이름은 BookOasis 버전에 따라 `샘플 업데이트`로 표시될 수 있습니다.
+
+- 저장소 `main`의 `VERSION`이 설치 버전보다 높을 때만 갱신합니다. 동일하거나 낮은 버전이면 업데이트하지 않습니다.
+- 갱신 대상은 `statistics.py`, `statistics_core.py`, `__init__.py`, `index.html`, `style.css`, `script.js`, `VERSION` 7개입니다. 스냅샷 DB, 공통 `base.py`, README와 이미지는 변경하지 않습니다.
+- 갱신 완료 후 기존 백그라운드 워커가 새 코드로 시작하도록 BookOasis 서버 또는 컨테이너를 재시작하고 통계 화면을 새로고침합니다.
+
+`1.1.1` 이하에는 manifest가 없어 업데이트 버튼이 표시되지 않습니다. Git으로 설치했다면 최초 한 번 BookOasis의 `plugins/metadata/`에서 다음 명령으로 `1.1.2` 이상을 받은 뒤 서버 또는 컨테이너를 재시작합니다. 수동 설치한 경우에는 위 7개 파일을 함께 교체합니다.
 
 ```bash
 git -C statistics pull --ff-only
 ```
 
-현재 `1.1.1`은 `update_manifest` 자동 업데이트 계약을 선언하지 않으므로 Git 기반 업데이트를 사용합니다.
-
-Docker 환경에서는 BookOasis `plugins` 디렉터리가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다.
+Git 방식으로 계속 관리해도 됩니다. 버튼 업데이트는 파일만 교체하고 Git 이력은 갱신하지 않으므로 두 방식을 혼용하면 `git pull` 시 로컬 변경 충돌이 발생할 수 있습니다. 직접 수정한 파일은 업데이트 전에 별도로 백업합니다.
 
 ### Docker 전체 plugins 볼륨의 구형 base.py 복구
 
@@ -230,6 +239,12 @@ node --check script.js
 개발 과정에서는 백그라운드 스냅샷, MariaDB SQL dialect, 보관함별 scope, 메타데이터 누락 계산, Heatmap 스크롤, MB/GB 축 변환과 드래그 카드 레이아웃에 대한 회귀 테스트를 수행했습니다. 개발용 테스트와 NAS 적용 스크립트는 GitHub 배포본에 포함하지 않습니다.
 
 ## 변경 이력
+
+### 1.1.2 - 2026-08-30
+
+- 공식 `update_manifest`를 선언해 플러그인 설정의 업데이트 버튼을 활성화했습니다.
+- 저장소 `main`에서 필수 런타임·UI 파일과 `VERSION`만 갱신하도록 등록했습니다.
+- 기존 버전의 최초 Git 갱신, 업데이트 후 재시작과 Git 방식 혼용 시 주의사항을 추가했습니다.
 
 ### 1.1.1 - 2026-08-30
 
