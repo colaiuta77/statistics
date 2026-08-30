@@ -2,15 +2,15 @@
 
 BookOasis 일반·성인 도서, 오디오북과 비디오 라이브러리를 백그라운드에서 미리 집계하고, 저장된 스냅샷을 ECharts 기반 대시보드로 빠르게 보여주는 독립 카테고리 플러그인입니다.
 
-![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.4.2)
+![BookOasis 통계 대시보드](docs/statistics-dashboard-overview.png?v=1.4.3)
 
-![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.4.2)
+![BookOasis 통계 상세 화면](docs/statistics-dashboard-detail.png?v=1.4.3)
 
 ## 버전 및 호환 정보
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.4.2` |
+| 플러그인 버전 | `1.4.3` |
 | 플러그인 ID | `statistics` |
 | 클래스 | `StatisticsMetadataProvider` |
 | 모듈 | `plugins.metadata.statistics.statistics` |
@@ -46,7 +46,7 @@ BookOasis `2.4.7`의 최신 `plugins/metadata/base.py`에 포함된 `start_backg
 - 상단 `카드 설정`에서 요약 카드·차트·독서 달력을 각각 표시하거나 숨길 수 있습니다.
 - Muuri 기반 카드 드래그 정렬, 빈 공간 채우기와 레이아웃 초기화를 제공합니다.
 - 카드 순서는 세션별로 브라우저 `localStorage`에 저장합니다.
-- 일반 카드는 1단, Heatmap·용량 트리맵·장르 연관성은 2단 높이를 사용해 재배치 시 정렬을 맞춥니다. 장르/태그 분포는 가로 2열 폭·1단 높이, 용량 막대 카드는 1열 폭·1단 높이입니다.
+- 일반 카드는 1단, Heatmap·장르 연관성은 2단 높이를 사용해 재배치 시 정렬을 맞춥니다. 장르/태그 분포와 용량 트리맵은 가로 2열 폭·1단 높이, 용량 막대 카드는 1열 폭·1단 높이입니다.
 - 모든 카드 헤더는 제목과 구분선 사이의 최소 간격을 유지합니다.
 - 일반·성인 도서 화면 맨 아래에 로그인한 사용자의 올해 독서 달력을 전체 너비로 표시합니다.
 - BookOasis 테마 CSS 변수를 사용해 다크/라이트 계열 테마에 맞춰 표시합니다.
@@ -72,7 +72,7 @@ BookOasis `2.4.7`의 최신 `plugins/metadata/base.py`에 포함된 `start_backg
 
 ### 용량 트리맵
 
-`용량이 큰 도서 · 트리맵`은 [ECharts Disk Usage 예제](https://echarts.apache.org/examples/en/editor.html?c=treemap-disk)를 참고했으며 `보관함별 메타데이터 완성도`와 같은 2열 폭·2단 높이를 사용합니다. 카드 오른쪽에서 표시 기준을 선택합니다.
+`용량이 큰 도서 · 트리맵`은 [ECharts Disk Usage 예제](https://echarts.apache.org/examples/en/editor.html?c=treemap-disk)를 참고했으며 2열 폭·1단 높이를 사용합니다. 좁은 화면에서는 1열 폭으로 맞춰집니다. 카드 오른쪽에서 표시 기준을 선택합니다.
 
 - `포맷별`은 포맷 → 항목 구조입니다. 포맷 영역을 클릭하면 확대되고 아래 경로로 돌아갈 수 있습니다. 상위 제목과 합산 용량은 `epub · 12.66 GB`처럼 한 줄로 표시합니다.
 - `용량순`은 포맷 구분 없이 큰 항목부터 배치합니다. 면적은 파일 크기에 비례하고 색은 큰 항목일수록 진하게, 작은 항목일수록 옅게 표시합니다. 색 농도는 현재 보관함의 표시 항목 범위 기준입니다.
@@ -289,6 +289,10 @@ node --check script.js
 개발 과정에서는 백그라운드 스냅샷, MariaDB SQL dialect, 보관함별 scope, 메타데이터 누락 계산, Heatmap 스크롤, MB/GB 축 변환과 드래그 카드 레이아웃에 대한 회귀 테스트를 수행했습니다. 개발용 테스트와 NAS 적용 스크립트는 GitHub 배포본에 포함하지 않습니다.
 
 ## 변경 이력
+
+### 1.4.3 - 2026-08-30
+
+- 용량 트리맵 카드의 세로 크기를 2단에서 1단으로 줄였습니다. 가로 폭과 포맷별/용량순 전환, 확대·경로 복귀, 작은 칸 툴팁은 유지합니다.
 
 ### 1.4.2 - 2026-08-30
 
