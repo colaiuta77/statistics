@@ -20,6 +20,14 @@
         <i class="fa-solid fa-table-cells-large" aria-hidden="true"></i>
         <span>레이아웃 초기화</span>
       </button>
+      <details class="bo-stats__settings" data-role="card-settings">
+        <summary><i class="fa-solid fa-sliders" aria-hidden="true"></i><span>카드 설정</span></summary>
+        <div class="bo-stats__settings-panel">
+          <p>현재 세션의 표시 설정을 이 브라우저에 저장합니다.</p>
+          <fieldset data-role="kpi-toggles"><legend>요약 카드</legend></fieldset>
+          <fieldset data-role="chart-toggles"><legend>차트 카드</legend></fieldset>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -57,6 +65,10 @@
     <article class="bo-stats__card" data-card="largest">
       <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서</h2></div></header>
       <div class="bo-stats__chart bo-stats__chart--tall" data-chart="largest"></div>
+    </article>
+    <article class="bo-stats__card bo-stats__card--wide bo-stats__card--double" data-card="largest-treemap">
+      <header><div><span class="bo-stats__card-kicker">STORAGE</span><h2>용량이 큰 도서 · 트리맵</h2></div><span class="bo-stats__card-note">용량 상위 항목 · 포맷별</span></header>
+      <div class="bo-stats__chart" data-chart="largest-treemap"></div>
     </article>
 
     <article class="bo-stats__card bo-stats__card--wide bo-stats__card--double" data-card="metadata-heatmap">

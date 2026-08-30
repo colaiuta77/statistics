@@ -15,6 +15,7 @@
   const SESSION_TYPE = SUPPORTED_SESSIONS.has(rawSessionType) ? rawSessionType : 'general';
   const ITEM_UNIT = SESSION_TYPE === 'general' || SESSION_TYPE === 'adult' ? '권' : '개';
   const CARD_ORDER_KEY = `bookoasis.statistics.cardOrder.v2.${SESSION_TYPE}`;
+  const HIDDEN_CARDS_KEY = `bookoasis.statistics.hiddenCards.v1.${SESSION_TYPE}`;
   const SESSION_UI = {
     general: { hidden: [], titles: {} },
     adult: { hidden: [], titles: {} },
@@ -23,6 +24,7 @@
       titles: {
         format: '트랙 포맷 분포',
         largest: '용량이 큰 오디오북',
+        'largest-treemap': '용량이 큰 오디오북 · 트리맵',
         'storage-format': '트랙 포맷별 저장 공간',
         'added-time': '오디오북 추가 추이',
         'publication-decade': '출시 시대',
@@ -36,6 +38,7 @@
       titles: {
         format: '에피소드 포맷 분포',
         largest: '용량이 큰 비디오',
+        'largest-treemap': '용량이 큰 비디오 · 트리맵',
         'storage-format': '에피소드 포맷별 저장 공간',
         'added-time': '비디오 추가 추이',
         'publication-decade': '출시 시대',
@@ -48,6 +51,7 @@
   const selectEl = root.querySelector('[data-role="library-select"]');
   const refreshEl = root.querySelector('[data-role="refresh"]');
   const layoutResetEl = root.querySelector('[data-role="layout-reset"]');
+  const cardSettingsEl = root.querySelector('[data-role="card-settings"]');
   const statusEl = root.querySelector('[data-role="status"]');
   const statusTextEl = root.querySelector('[data-role="status-text"]');
   const kpisEl = root.querySelector('[data-role="kpis"]');
@@ -60,6 +64,10 @@
   const layoutMedia = window.matchMedia('(min-width: 721px)');
   applySessionUi();
   const defaultCardOrder = Array.from(chartsEl.querySelectorAll('[data-card]:not([hidden])')).map((el) => el.dataset.card);
+  const supportedCardIds = new Set(defaultCardOrder);
+  if (calendarCard && !calendarCard.hidden) supportedCardIds.add('reading-calendar');
+  const hiddenCards = new Set(readStoredIds(HIDDEN_CARDS_KEY));
+  let cardOrder = defaultCardOrder.slice();
   let cardGrid = null;
   let cardResizeObserver = null;
   let layoutRefreshFrame = 0;
@@ -107,9 +115,9 @@
     return window.__bookoasisStatisticsMuuriPromise;
   }
 
-  function readStoredCardOrder() {
+  function readStoredIds(key) {
     try {
-      const parsed = JSON.parse(window.localStorage.getItem(CARD_ORDER_KEY) || '[]');
+      const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
       return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
     } catch (_) {
       return [];
@@ -130,6 +138,7 @@
       const el = byId.get(cardId);
       if (el && !seen.has(cardId)) chartsEl.appendChild(el);
     });
+    cardOrder = Array.from(chartsEl.querySelectorAll('[data-card]')).map(el => el.dataset.card).filter(id => supportedCardIds.has(id));
   }
 
   function prepareCardDragHandles() {
@@ -154,7 +163,10 @@
     const order = cardGrid
       ? cardGrid.getItems().map((item) => item.getElement().dataset.card).filter(Boolean)
       : Array.from(chartsEl.querySelectorAll('[data-card]')).map((el) => el.dataset.card);
-    try { window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(order)); } catch (_) {}
+    const moved = new Set(order);
+    let index = 0;
+    cardOrder = cardOrder.map(id => moved.has(id) ? order[index++] : id);
+    try { window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(cardOrder)); } catch (_) {}
   }
 
   function resizeAllCharts() {
@@ -209,6 +221,7 @@
     try { cardGrid.destroy(); } catch (_) {}
     cardGrid = null;
     chartsEl.classList.remove('bo-stats__charts--muuri');
+    reorderCardDom(cardOrder);
     resizeAllCharts();
   }
 
@@ -265,7 +278,68 @@
     syncCardLayoutMode();
   }
 
-  reorderCardDom(readStoredCardOrder());
+  function applyCardVisibility() {
+    root.querySelectorAll('[data-card]').forEach(card => {
+      const id = card.dataset.card;
+      card.hidden = !supportedCardIds.has(id) || hiddenCards.has(id);
+      if (card.hidden) card.querySelectorAll('[data-chart]').forEach(el => disposeChart(el.dataset.chart));
+    });
+  }
+
+  function buildCardSettings() {
+    if (!cardSettingsEl) return;
+    const addToggle = (group, id, title) => {
+      const label = document.createElement('label');
+      const text = document.createElement('span');
+      text.textContent = title;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('role', 'switch');
+      input.dataset.cardToggle = id;
+      input.checked = !hiddenCards.has(id);
+      label.append(text, input);
+      group.appendChild(label);
+    };
+    const kpiGroup = cardSettingsEl.querySelector('[data-role="kpi-toggles"]');
+    kpiItems({}).forEach(([id, , title]) => {
+      supportedCardIds.add('kpi-' + id);
+      addToggle(kpiGroup, 'kpi-' + id, title);
+    });
+    const chartGroup = cardSettingsEl.querySelector('[data-role="chart-toggles"]');
+    root.querySelectorAll('article[data-card]').forEach(card => {
+      if (supportedCardIds.has(card.dataset.card)) addToggle(chartGroup, card.dataset.card, card.querySelector('h2').textContent);
+    });
+    cardSettingsEl.addEventListener('change', event => {
+      const input = event.target.closest('[data-card-toggle]');
+      if (!input) return;
+      const id = input.dataset.cardToggle;
+      if (input.checked) hiddenCards.delete(id);
+      else hiddenCards.add(id);
+      try { window.localStorage.setItem(HIDDEN_CARDS_KEY, JSON.stringify([...hiddenCards])); } catch (_) {}
+      destroyCardGrid();
+      applyCardVisibility();
+      syncCardLayoutMode();
+      if (latestState && latestState.snapshot) {
+        const scope = latestState.snapshot.scopes[currentScopeId] || latestState.snapshot.scopes.all;
+        renderCharts(scope);
+      }
+      if (id === 'reading-calendar') {
+        calendarRequest++;
+        calendarState = null;
+        refreshReadingCalendar(true);
+      }
+    });
+    cardSettingsEl.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        cardSettingsEl.open = false;
+        cardSettingsEl.querySelector('summary').focus();
+      }
+    });
+  }
+
+  reorderCardDom(readStoredIds(CARD_ORDER_KEY));
+  buildCardSettings();
+  applyCardVisibility();
   prepareCardDragHandles();
 
   function css(name, fallback) {
@@ -408,50 +482,56 @@
     selectEl.value = currentScopeId;
   }
 
-  function renderKpis(summary) {
+  function kpiItems(summary) {
     const pubRange = summary.publication_year_min && summary.publication_year_max
       ? `${summary.publication_year_min}–${summary.publication_year_max}` : '–';
     let items = [
-      ['fa-book', '도서', formatNumber(summary.book_count)],
-      ['fa-user-pen', '저자', formatNumber(summary.author_count)],
-      ['fa-layer-group', '시리즈', formatNumber(summary.series_count)],
-      ['fa-building', '출판사', formatNumber(summary.publisher_count)],
-      ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-      ['fa-tags', '장르', formatNumber(summary.genre_count)],
-      ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-      ['fa-calendar-days', '출판 연도', pubRange],
-      ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+      ['items', 'fa-book', '도서', formatNumber(summary.book_count)],
+      ['authors', 'fa-user-pen', '저자', formatNumber(summary.author_count)],
+      ['series', 'fa-layer-group', '시리즈', formatNumber(summary.series_count)],
+      ['publishers', 'fa-building', '출판사', formatNumber(summary.publisher_count)],
+      ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+      ['genres', 'fa-tags', '장르', formatNumber(summary.genre_count)],
+      ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+      ['years', 'fa-calendar-days', '출판 연도', pubRange],
+      ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
     ];
     if (SESSION_TYPE === 'adult') {
-      items[0][1] = '성인 도서';
+      items[0][2] = '성인 도서';
     } else if (SESSION_TYPE === 'audiobook') {
       items = [
-        ['fa-headphones', '오디오북', formatNumber(summary.item_count)],
-        ['fa-user-pen', '저자', formatNumber(summary.author_count)],
-        ['fa-list-ol', '트랙', formatNumber(summary.child_count)],
-        ['fa-building', '출판사', formatNumber(summary.publisher_count)],
-        ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-        ['fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
-        ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-        ['fa-calendar-days', '출시 연도', pubRange],
-        ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+        ['items', 'fa-headphones', '오디오북', formatNumber(summary.item_count)],
+        ['authors', 'fa-user-pen', '저자', formatNumber(summary.author_count)],
+        ['children', 'fa-list-ol', '트랙', formatNumber(summary.child_count)],
+        ['publishers', 'fa-building', '출판사', formatNumber(summary.publisher_count)],
+        ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+        ['duration', 'fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
+        ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+        ['years', 'fa-calendar-days', '출시 연도', pubRange],
+        ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
       ];
     } else if (SESSION_TYPE === 'video') {
       items = [
-        ['fa-film', '비디오', formatNumber(summary.item_count)],
-        ['fa-list-ol', '에피소드', formatNumber(summary.child_count)],
-        ['fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
-        ['fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
-        ['fa-tags', '장르', formatNumber(summary.genre_count)],
-        ['fa-book-open', '보관함', formatNumber(summary.library_count)],
-        ['fa-calendar-days', '출시 연도', pubRange],
-        ['fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
+        ['items', 'fa-film', '비디오', formatNumber(summary.item_count)],
+        ['children', 'fa-list-ol', '에피소드', formatNumber(summary.child_count)],
+        ['storage', 'fa-hard-drive', '저장 공간', formatBytes(summary.storage_bytes)],
+        ['duration', 'fa-clock', '총 재생시간', formatDuration(summary.duration_seconds)],
+        ['genres', 'fa-tags', '장르', formatNumber(summary.genre_count)],
+        ['libraries', 'fa-book-open', '보관함', formatNumber(summary.library_count)],
+        ['years', 'fa-calendar-days', '출시 연도', pubRange],
+        ['added', 'fa-arrow-trend-up', '올해 추가', formatNumber(summary.added_this_year)]
       ];
     }
+    return items;
+  }
+
+  function renderKpis(summary) {
     kpisEl.textContent = '';
-    items.forEach(([icon, label, value]) => {
+    kpiItems(summary).forEach(([id, icon, label, value]) => {
       const card = document.createElement('div');
       card.className = 'bo-stats__kpi';
+      card.dataset.card = 'kpi-' + id;
+      card.hidden = hiddenCards.has(card.dataset.card);
       const labelEl = document.createElement('div');
       labelEl.className = 'bo-stats__kpi-label';
       const iconEl = document.createElement('i');
@@ -479,7 +559,7 @@
   function emptyChart(key, message) {
     disposeChart(key);
     const el = root.querySelector(`[data-chart="${key}"]`);
-    if (!el) return;
+    if (!el || el.closest('[data-card]')?.hidden) return;
     el.textContent = '';
     const empty = document.createElement('div');
     empty.className = 'bo-stats__chart-empty';
@@ -489,8 +569,8 @@
 
   function makeChart(key, option) {
     const el = root.querySelector(`[data-chart="${key}"]`);
-    if (!el || !window.echarts) return;
     disposeChart(key);
+    if (!el || !window.echarts || el.closest('[data-card]')?.hidden) return;
     el.textContent = '';
     const chart = window.echarts.init(el, null, { renderer: 'svg' });
     chart.setOption(option, { notMerge: true });
@@ -661,6 +741,39 @@
     });
   }
 
+  function largestTreemapOption(rows) {
+    const t = theme();
+    const groups = new Map();
+    rows.forEach(row => {
+      const format = String(row.format || '').trim().toLowerCase() || '기타';
+      if (!groups.has(format)) groups.set(format, { name: format, value: 0, children: [] });
+      const group = groups.get(format);
+      const bytes = Number(row.bytes);
+      group.value += bytes;
+      group.children.push({ id: String(row.id), name: row.title || '제목 없음', value: bytes });
+    });
+    return Object.assign(baseOption(), {
+      tooltip: { ...baseOption().tooltip, formatter: p => {
+        const path = (p.treePathInfo || []).slice(1).map(node => node.name).join(' / ');
+        return `${escapeTooltip(path || p.name)}<br><b>${formatBytes(p.value)}</b>`;
+      } },
+      series: [{
+        name: '용량 상위 항목', type: 'treemap', roam: false, nodeClick: 'zoomToNode',
+        left: 12, right: 12, top: 12, bottom: 38,
+        label: { show: true, color: '#fff', fontSize: 11, formatter: p => `${p.name}\n${formatBytes(p.value)}` },
+        upperLabel: { show: true, height: 24, color: '#fff' },
+        itemStyle: { borderColor: t.card },
+        levels: [
+          { itemStyle: { borderWidth: 0, gapWidth: 5 } },
+          { itemStyle: { borderWidth: 2, gapWidth: 2 } },
+          { colorSaturation: [.35, .6], itemStyle: { gapWidth: 1 } }
+        ],
+        breadcrumb: { show: true, bottom: 5, itemStyle: { color: t.card, borderColor: t.border, textStyle: { color: t.text } } },
+        data: [...groups.values()]
+      }]
+    });
+  }
+
   function renderCharts(scope) {
     if (!window.echarts) return;
     const t = theme();
@@ -706,6 +819,9 @@
     const largest = scope.largest_books || [];
     if (largest.length) makeChart('largest', largestBooksOption(largest));
     else emptyChart('largest');
+    const sized = largest.filter(row => Number.isFinite(Number(row.bytes)) && Number(row.bytes) > 0);
+    if (sized.length) makeChart('largest-treemap', largestTreemapOption(sized));
+    else emptyChart('largest-treemap');
 
     const heat = scope.library_metadata_completeness || {};
     if ((heat.libraries || []).length && (heat.fields || []).length) {

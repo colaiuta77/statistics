@@ -10,7 +10,7 @@ from plugins.metadata.base import BaseMetadataProvider
 from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.0"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
