@@ -272,6 +272,12 @@
 }
 
 .bo-stats__card--wide { grid-column: span 2; }
+[data-app-theme="dark"] .bo-stats__hero,
+[data-app-theme="dark"] .bo-stats__kpi,
+[data-app-theme="dark"] .bo-stats__card {
+  background: color-mix(in srgb, var(--stats-card) 97%, white 3%);
+}
+
 .bo-stats__card--full { grid-column: 1 / -1; }
 .bo-stats__card--double { height: var(--stats-card-double); min-height: var(--stats-card-double); }
 
