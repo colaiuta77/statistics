@@ -6,7 +6,8 @@
   --stats-muted: var(--app-text-muted, #94a3b8);
   --stats-border: var(--app-border, rgba(255,255,255,.1));
   --stats-border-light: var(--app-border-light, rgba(255,255,255,.06));
-  --stats-card-outline: color-mix(in srgb, var(--stats-border) 82%, var(--stats-text));
+  --stats-card-outline: color-mix(in srgb, var(--stats-border) 92%, var(--stats-text));
+  --stats-card-shadow: 0 2px 8px rgba(0,0,0,.12);
   --stats-accent: var(--app-accent, #8b5cf6);
   --stats-input: var(--app-input-bg, rgba(0,0,0,.18));
   --stats-card-unit: 330px;
@@ -33,6 +34,7 @@
   border: 1px solid var(--stats-card-outline);
   border-radius: 14px;
   background: color-mix(in srgb, var(--stats-card) 94%, transparent);
+  box-shadow: var(--stats-card-shadow);
 }
 
 .bo-stats__brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -227,7 +229,7 @@
   border: 1px solid var(--stats-card-outline);
   border-radius: 9px;
   background: var(--stats-card);
-  box-shadow: var(--app-shadow, 0 4px 18px rgba(0,0,0,.08));
+  box-shadow: var(--stats-card-shadow);
 }
 
 .bo-stats__kpi-label {
@@ -266,7 +268,7 @@
   border: 1px solid var(--stats-card-outline);
   border-radius: 10px;
   background: var(--stats-card);
-  box-shadow: var(--app-shadow, 0 5px 22px rgba(0,0,0,.08));
+  box-shadow: var(--stats-card-shadow);
 }
 
 .bo-stats__card--wide { grid-column: span 2; }
