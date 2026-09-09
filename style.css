@@ -6,6 +6,7 @@
   --stats-muted: var(--app-text-muted, #94a3b8);
   --stats-border: var(--app-border, rgba(255,255,255,.1));
   --stats-border-light: var(--app-border-light, rgba(255,255,255,.06));
+  --stats-card-outline: color-mix(in srgb, var(--stats-border) 82%, var(--stats-text));
   --stats-accent: var(--app-accent, #8b5cf6);
   --stats-input: var(--app-input-bg, rgba(0,0,0,.18));
   --stats-card-unit: 330px;
@@ -29,7 +30,7 @@
   gap: 24px;
   padding: 14px 18px;
   margin-bottom: 14px;
-  border: 1px solid var(--stats-border);
+  border: 1px solid var(--stats-card-outline);
   border-radius: 14px;
   background: color-mix(in srgb, var(--stats-card) 94%, transparent);
 }
@@ -223,7 +224,7 @@
 .bo-stats__kpi {
   min-width: 0;
   padding: 13px 14px 12px;
-  border: 1px solid var(--stats-border-light);
+  border: 1px solid var(--stats-card-outline);
   border-radius: 9px;
   background: var(--stats-card);
   box-shadow: var(--app-shadow, 0 4px 18px rgba(0,0,0,.08));
@@ -262,7 +263,7 @@
   height: var(--stats-card-unit);
   min-height: var(--stats-card-unit);
   overflow: hidden;
-  border: 1px solid var(--stats-border-light);
+  border: 1px solid var(--stats-card-outline);
   border-radius: 10px;
   background: var(--stats-card);
   box-shadow: var(--app-shadow, 0 5px 22px rgba(0,0,0,.08));
