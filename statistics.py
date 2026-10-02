@@ -10,7 +10,7 @@ from plugins.metadata.base import BaseMetadataProvider
 from .statistics_core import MediaStatisticsAggregator, SnapshotStore, StatisticsAggregator, StatisticsRuntime
 
 SELF_ID = "statistics"
-PLUGIN_VERSION = "1.5.1"
+PLUGIN_VERSION = "1.6.0"
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.normpath(os.path.join(_PLUGIN_DIR, "..", "..", "data", SELF_ID))
 SUPPORTED_SESSIONS = ("general", "adult", "audiobook", "video")
@@ -84,15 +84,53 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
             return StatisticsAggregator(gateway, session_type=db_type).aggregate()
         return MediaStatisticsAggregator(gateway, db_type).aggregate()
 
+    def _report_runtime_problem(self, db_type, reason, error):
+        report = getattr(self, "report_problem", None)
+        if not callable(report):
+            return
+        labels = {"general": "일반 도서", "adult": "성인 도서", "audiobook": "오디오북", "video": "비디오"}
+        failure = "백그라운드 시작 실패" if reason == "start_failed" else "집계·저장 실패"
+        try:
+            report(
+                f"{reason}.{db_type}",
+                title=f"{labels[db_type]} 통계 {failure}",
+                detail="DB 연결과 통계 저장 경로의 권한·여유 공간을 확인한 뒤 재시도하세요. 마지막 정상 통계가 있으면 계속 표시합니다.",
+                severity="action_required",
+                db_type=db_type,
+                target_type="system",
+                action_id="statistics_retry",
+                action_label="통계 재시도",
+                message=str(error)[:1000],
+            )
+        except Exception:
+            logger.warning("통계 문제 카드 등록 실패: %s", db_type, exc_info=True)
+
+    def _on_refresh_result(self, db_type, success, error):
+        if not success:
+            self._report_runtime_problem(db_type, "refresh_failed", error)
+            return
+        resolve = getattr(self, "resolve_problem", None)
+        if callable(resolve):
+            for reason in ("refresh_failed", "start_failed"):
+                try:
+                    resolve(f"{reason}.{db_type}", db_type=db_type)
+                except Exception:
+                    logger.warning("통계 문제 카드 해결 실패: %s", db_type, exc_info=True)
+
     def _get_or_start_runtime(self, db_type, initial_delay=0):
         session_type = _normalize_session(db_type)
         if session_type is None:
             return None
         runtime = _RUNTIMES[session_type]
-        runtime.start(
-            lambda session_type=session_type: self._aggregate_session(session_type),
-            initial_delay=initial_delay,
-        )
+        runtime.on_refresh_result = lambda success, error: self._on_refresh_result(session_type, success, error)
+        try:
+            runtime.start(
+                lambda session_type=session_type: self._aggregate_session(session_type),
+                initial_delay=initial_delay,
+            )
+        except Exception as error:
+            self._report_runtime_problem(session_type, "start_failed", error)
+            raise
         return runtime
 
     def start_background_service(self, db_type):
@@ -169,6 +207,16 @@ class StatisticsMetadataProvider(BaseMetadataProvider):
         return {"success": True, "year": today.year, "days": days}
 
     def run_context_menu_action(self, db_type, action_id, context):
+        if action_id == "statistics_retry":
+            from flask import has_request_context, session
+
+            if not has_request_context() or not session.get("user_id") or session.get("role") != "admin":
+                return {"success": False, "error": "통계 재시도는 관리자만 실행할 수 있습니다."}
+            runtime = self._get_or_start_runtime(db_type)
+            if runtime is None:
+                return {"success": False, "error": "지원하지 않는 통계 세션입니다."}
+            accepted = runtime.request_refresh(delay=0, debounce=False)
+            return {"success": True, "accepted": bool(accepted), "message": "통계 재시도를 예약했습니다."}
         if action_id != "statistics_rpc":
             return {"success": False, "error": "지원하지 않는 통계 요청입니다."}
         context = context or {}

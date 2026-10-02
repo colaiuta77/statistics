@@ -1175,7 +1175,7 @@
       }
     }, 80);
   });
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-app-theme'] });
 
   const removalObserver = new MutationObserver(() => {
     if (!container.isConnected) cleanup();
