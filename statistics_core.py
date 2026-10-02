@@ -189,6 +189,7 @@ class StatisticsRuntime:
         self._status = "idle" if self._snapshot else "waiting"
         self._last_error = ""
         self._last_attempt_at = ""
+        self.on_refresh_result = None
 
     def configure(self, aggregate_callable):
         if aggregate_callable is not None:
@@ -204,11 +205,19 @@ class StatisticsRuntime:
                 "refresh_scheduled": self._next_due is not None,
             }
 
+    def _notify_refresh_result(self, success, error=""):
+        if callable(self.on_refresh_result):
+            try:
+                self.on_refresh_result(success, error)
+            except Exception as notify_error:
+                print(f"[Statistics] result notification failed: {notify_error}")
+
     def refresh_once(self):
         if not callable(self.aggregate_callable):
             with self._state_lock:
                 self._status = "error"
                 self._last_error = "statistics aggregator is not configured"
+            self._notify_refresh_result(False, "statistics aggregator is not configured")
             return False
         if not self._refresh_lock.acquire(blocking=False):
             return False
@@ -230,12 +239,14 @@ class StatisticsRuntime:
                     self._snapshot = payload
                     self._status = "idle"
                     self._last_error = ""
+                self._notify_refresh_result(True)
                 return True
             except Exception as error:
                 with self._state_lock:
                     self._status = "error"
                     self._last_error = str(error)[:1000]
                 print(f"[Statistics] refresh failed: {error}")
+                self._notify_refresh_result(False, str(error)[:1000])
                 return False
         finally:
             self._refresh_lock.release()
