@@ -1,18 +1,19 @@
-(function () {
+(function mountStatistics(sessionType, template) {
   'use strict';
 
-  const root = container.querySelector('[data-statistics-root]');
-  if (!root) return;
   if (container.__statisticsCleanup) {
     try { container.__statisticsCleanup(); } catch (_) {}
   }
+  container.innerHTML = template;
+  const root = container.querySelector('[data-statistics-root]');
+  if (!root) return;
 
   const ACTION_URL = '/api/media/context-menu/book/plugins/action';
   const ECHARTS_URL = 'https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js';
   const MUURI_URL = 'https://cdn.jsdelivr.net/npm/muuri@0.9.5/dist/muuri.min.js';
   const SUPPORTED_SESSIONS = new Set(['general', 'adult', 'audiobook', 'video']);
-  const rawSessionType = String(window.currentLibraryType || 'general').trim().toLowerCase();
-  const SESSION_TYPE = SUPPORTED_SESSIONS.has(rawSessionType) ? rawSessionType : 'general';
+  const rawSessionType = String(sessionType || 'general').trim().toLowerCase();
+  const SESSION_TYPE = SUPPORTED_SESSIONS.has(rawSessionType) && canAccessSession(rawSessionType) ? rawSessionType : 'general';
   const ITEM_UNIT = SESSION_TYPE === 'general' || SESSION_TYPE === 'adult' ? '권' : '개';
   const CARD_ORDER_KEY = `bookoasis.statistics.cardOrder.v2.${SESSION_TYPE}`;
   const HIDDEN_CARDS_KEY = `bookoasis.statistics.hiddenCards.v1.${SESSION_TYPE}`;
@@ -48,6 +49,19 @@
       }
     }
   };
+  const sessionSelectEl = root.querySelector('[data-role="session-select"]');
+  Array.from(sessionSelectEl.options).forEach(option => { option.disabled = !canAccessSession(option.value); });
+  sessionSelectEl.value = SESSION_TYPE;
+  sessionSelectEl.addEventListener('change', () => {
+    const next = sessionSelectEl.value;
+    if (!SUPPORTED_SESSIONS.has(next) || !canAccessSession(next)) {
+      sessionSelectEl.value = SESSION_TYPE;
+      return;
+    }
+    if (next === SESSION_TYPE) return;
+    mountStatistics(next, template);
+    container.querySelector('[data-role="session-select"]').focus();
+  });
   const selectEl = root.querySelector('[data-role="library-select"]');
   const refreshEl = root.querySelector('[data-role="refresh"]');
   const layoutResetEl = root.querySelector('[data-role="layout-reset"]');
@@ -69,6 +83,7 @@
   const weekdaySummary = root.querySelector('[data-role="weekday-summary"]');
   if (calendarCard) calendarCard.hidden = !['general', 'adult'].includes(SESSION_TYPE);
   const charts = new Map();
+  const requestController = new AbortController();
   const layoutMedia = window.matchMedia('(min-width: 721px)');
   applySessionUi();
   const defaultCardOrder = Array.from(chartsEl.querySelectorAll('[data-card]:not([hidden])')).map((el) => el.dataset.card);
@@ -85,6 +100,11 @@
   let disposed = false;
   let calendarState = null;
   let calendarRequest = 0;
+
+  function canAccessSession(type) {
+    const user = window.currentUser;
+    return type === 'general' || !user || user.role === 'admin' || Number(user[`has_${type}_access`]) === 1;
+  }
 
   function applySessionUi() {
     const settings = SESSION_UI[SESSION_TYPE] || SESSION_UI.general;
@@ -417,6 +437,7 @@
     const response = await fetch(ACTION_URL, {
       method: 'POST',
       credentials: 'same-origin',
+      signal: requestController.signal,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         type: SESSION_TYPE,
@@ -455,6 +476,7 @@
   }
 
   function setStatus(state, message) {
+    if (disposed) return;
     statusEl.dataset.state = state || 'idle';
     statusTextEl.textContent = message || '';
   }
@@ -1088,6 +1110,7 @@
   }
 
   function updateState(state) {
+    if (disposed) return;
     latestState = state;
     const stateName = state.status === 'error' ? 'error' : (state.status === 'refreshing' ? 'refreshing' : 'idle');
     setStatus(stateName, statusMessage(state));
@@ -1142,10 +1165,12 @@
     setStatus('refreshing', '통계 재집계를 요청하고 있습니다...');
     try {
       const state = await rpc('refresh');
+      if (disposed) return;
       updateState(state);
       window.clearTimeout(pollTimer);
       pollTimer = window.setTimeout(poll, 900);
     } catch (error) {
+      if (disposed) return;
       setStatus('error', error.message || String(error));
       refreshEl.disabled = false;
       refreshEl.classList.remove('is-spinning');
@@ -1185,6 +1210,7 @@
   function cleanup() {
     if (disposed) return;
     disposed = true;
+    requestController.abort();
     window.clearTimeout(pollTimer);
     window.clearTimeout(themeTimer);
     window.removeEventListener('resize', resizeHandler);
@@ -1217,4 +1243,4 @@
     window.clearTimeout(pollTimer);
     pollTimer = window.setTimeout(poll, (!latestState || !latestState.snapshot) ? 2500 : 30000);
   });
-})();
+})(window.currentLibraryType || 'general', container.innerHTML);
